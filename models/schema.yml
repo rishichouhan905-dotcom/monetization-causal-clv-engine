@@ -1,0 +1,65 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: "Staging view for raw Online Retail II transactions with explicit cancellation and return flags."
+    columns:
+      - name: customer_id
+        data_tests:
+          - not_null
+      - name: line_total
+        data_tests:
+          - not_null
+
+  - name: dim_customers
+    description: "Customer dimension table with gross, return, and net spend metrics."
+    columns:
+      - name: customer_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: dim_products
+    description: "Product dimension table with aggregate sales statistics."
+    columns:
+      - name: stock_code
+        data_tests:
+          - unique
+          - not_null
+
+  - name: fact_transactions
+    description: "Line-item transaction fact table with foreign key constraints."
+    columns:
+      - name: transaction_id
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: stock_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: stock_code
+
+  - name: fact_order_events
+    description: "Transaction-derived order activity event fact table (renamed honestly from fact_user_events)."
+    columns:
+      - name: event_id
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id

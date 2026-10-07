@@ -1,0 +1,54 @@
+# Python byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Build and Packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.cache/
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# dbt build & target artifacts
+target/
+dbt_packages/
+logs/
+
+# Data files & Databases (Heavy binary files)
+*.xlsx
+*.csv
+*.duckdb
+data/*.xlsx
+data/*.csv
+data/*.duckdb
+
+# IDEs & System Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clv_causal"
+version = "0.1.0"
+description = "Enterprise Probabilistic CLV & Causal Impact Decision Platform"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "duckdb",
+    "scipy",
+    "lifetimes",
+    "streamlit",
+    "plotly",
+    "openpyxl"
+]
+
+[project.scripts]
+run-pipeline = "clv_causal.run_pipeline:run_full_pipeline"
+
+[tool.setuptools.packages.find]
+where = ["src"]
