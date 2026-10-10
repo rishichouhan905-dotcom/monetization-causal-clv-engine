@@ -12,7 +12,7 @@ from causal.decision_engine import run_decision_engine
 from causal.evaluation import run_full_causal_evaluation
 from causal.simulate_policy import simulate_policy_intervention
 from clv_causal.clv_engine.clv_pipeline import run_clv_pipeline
-from clv_causal.config import INTERVENTION_DATE, POLICY_LIFT_PCT
+from clv_causal.config import INTERVENTION_DATE
 from clv_causal.data.download_dataset import ingest_data
 from clv_causal.warehouse.build_warehouse import build_star_schema
 

@@ -12,7 +12,7 @@ dates:
   end_date: "2011-12-09"
   calibration_end_date: "2010-12-01"
   holdout_end_date: "2011-12-09"
-  intervention_date: "2010-06-01"
+  intervention_date: "2011-06-01"
 
 clv_model:
   estimation_method: "Maximum Likelihood Estimation (MLE)"
@@ -27,9 +27,6 @@ causal_model:
   aov_change: 0.10
   top_clv_churn_hazard: 0.20
   random_seed: 42
-  policy_lift_pct: 0.15
-  target_treated_country: "Germany"
-  top_n_donors: 7
 
 decision_engine:
   cac_per_customer: 45.0

@@ -7,7 +7,7 @@ treatment policy interventions with known multiplicative effects.
 from typing import Dict, Optional
 import pandas as pd
 
-from causal.simulate_policy import simulate_policy_intervention
+from causal.simulate_policy import get_ground_truth_effects, simulate_policy_intervention
 from clv_causal.config import (
     AOV_CHANGE,
     DB_PATH,

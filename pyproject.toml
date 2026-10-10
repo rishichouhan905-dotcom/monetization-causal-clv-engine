@@ -16,7 +16,8 @@ dependencies = [
     "lifetimes",
     "streamlit",
     "plotly",
-    "openpyxl"
+    "openpyxl",
+    "linearmodels"
 ]
 
 [project.scripts]

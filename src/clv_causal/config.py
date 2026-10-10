@@ -51,7 +51,7 @@ END_DATE: str = dates_cfg.get("end_date", "2011-12-09")
 CALIBRATION_END_DATE: str = dates_cfg.get("calibration_end_date", "2010-12-01")
 HOLDOUT_END_DATE: str = dates_cfg.get("holdout_end_date", "2011-12-09")
 OBSERVATION_END_DATE: str = CALIBRATION_END_DATE
-INTERVENTION_DATE: str = dates_cfg.get("intervention_date", "2010-06-01")
+INTERVENTION_DATE: str = dates_cfg.get("intervention_date", "2011-06-01")
 
 # CLV Model Parameters
 clv_cfg = CONFIG_DICT.get("clv_model", {})
@@ -68,9 +68,6 @@ ORDER_RATE_CHANGE: float = float(causal_cfg.get("order_rate_change", 0.15))
 AOV_CHANGE: float = float(causal_cfg.get("aov_change", 0.10))
 TOP_CLV_CHURN_HAZARD: float = float(causal_cfg.get("top_clv_churn_hazard", 0.20))
 RANDOM_SEED: int = int(causal_cfg.get("random_seed", 42))
-POLICY_LIFT_PCT: float = float(causal_cfg.get("policy_lift_pct", 0.15))
-TARGET_TREATED_COUNTRY: str = causal_cfg.get("target_treated_country", "Germany")
-TOP_N_DONORS: int = int(causal_cfg.get("top_n_donors", 7))
 
 # Decision Engine Parameters
 decision_cfg = CONFIG_DICT.get("decision_engine", {})
