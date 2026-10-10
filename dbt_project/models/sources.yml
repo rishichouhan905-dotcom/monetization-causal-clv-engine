@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: raw_online_retail
+    schema: main
+    tables:
+      - name: raw_online_retail
+        description: "Raw UCI Online Retail II multi-year transaction dataset"

@@ -43,9 +43,17 @@ logs/
 *.xlsx
 *.csv
 *.duckdb
+*.parquet
 data/*.xlsx
 data/*.csv
 data/*.duckdb
+data/raw/
+!results/
+!results/*.csv
+
+# User & Presentation files
+SKILLPULSE.pptx
+.user.yml
 
 # IDEs & System Files
 .vscode/

@@ -1,6 +1,0 @@
-clv_causal:
-  target: dev
-  outputs:
-    dev:
-      type: duckdb
-      path: 'data/retail_warehouse.duckdb'

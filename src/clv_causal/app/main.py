@@ -25,8 +25,8 @@ def main():
     tabs = st.tabs([
         "📊 Executive Overview",
         "🔮 Probabilistic CLV Studio",
-        "🧪 Causal Impact & Quasi-Experimentation",
-        "🎯 Strategy & Decision Studio"
+        "🧪 Causal DiD & Event Study",
+        "🎯 Strategy & Executive Decision Studio"
     ])
     
     with tabs[0]:

@@ -1,0 +1,37 @@
+paths:
+  data_dir: "data"
+  raw_dir: "data/raw"
+  db_path: "data/retail_warehouse.duckdb"
+  excel_path: "data/online_retail_II.xlsx"
+  parquet_path: "data/raw/online_retail_II.parquet"
+  csv_path: "data/online_retail_II.csv"
+  uci_url: "https://archive.ics.uci.edu/ml/machine-learning-databases/00502/online_retail_II.xlsx"
+
+dates:
+  start_date: "2009-12-01"
+  end_date: "2011-12-09"
+  calibration_end_date: "2010-12-01"
+  holdout_end_date: "2011-12-09"
+  intervention_date: "2010-06-01"
+
+clv_model:
+  estimation_method: "Maximum Likelihood Estimation (MLE)"
+  penalizer_coef: 0.0
+  discount_rate: 0.01
+  prediction_months: [12, 24]
+  n_bootstraps: 30
+
+causal_model:
+  treatment_share: 0.40
+  order_rate_change: 0.15
+  aov_change: 0.10
+  top_clv_churn_hazard: 0.20
+  random_seed: 42
+  policy_lift_pct: 0.15
+  target_treated_country: "Germany"
+  top_n_donors: 7
+
+decision_engine:
+  cac_per_customer: 45.0
+  gross_margin_pct: 0.40
+  campaign_cost_per_target: 15.0

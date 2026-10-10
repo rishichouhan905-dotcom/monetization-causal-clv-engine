@@ -127,6 +127,7 @@ Open `http://localhost:8501` in your web browser.
 │   ├── clv_engine/                # BG/NBD & Gamma-Gamma probabilistic CLV
 │   └── causal_engine/             # DiD, CRSE, Synthetic Control & Decision Engine
 ├── tests/                         # Pytest test suite
+├── config.yaml                    # Centralized YAML Configuration (paths, dates, hyperparameters)
 ├── dbt_project.yml                # dbt Project Configuration
 ├── profiles.yml                   # dbt DuckDB Target Connection Profile
 ├── pyproject.toml / setup.py      # Package Setup (pip install -e .)

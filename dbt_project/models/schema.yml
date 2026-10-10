@@ -1,0 +1,98 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "Staging table for raw transactions with return flags preserved."
+    columns:
+      - name: customer_id
+        description: "Customer identifier."
+        tests:
+          - not_null
+      - name: is_return
+        description: "Boolean return flag."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+  - name: stg_customers
+    description: "Staging distinct customer table."
+    columns:
+      - name: customer_id
+        description: "Customer primary key."
+        tests:
+          - unique
+          - not_null
+
+  - name: int_orders
+    description: "Intermediate order line-items with gross and return subtotals."
+    columns:
+      - name: transaction_id
+        description: "Unique line item surrogate key."
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_customers
+    description: "Customer dimension table."
+    columns:
+      - name: customer_id
+        description: "Primary key customer ID."
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_products
+    description: "Product catalog dimension table."
+    columns:
+      - name: stock_code
+        description: "Primary key product stock code."
+        tests:
+          - unique
+          - not_null
+
+  - name: fact_orders
+    description: "Order line-item fact table."
+    columns:
+      - name: order_id
+        description: "Primary key order line item ID."
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key customer ID."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_id
+      - name: stock_code
+        description: "Foreign key product stock code."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: stock_code
+
+  - name: fact_returns
+    description: "Fact table for order returns."
+    columns:
+      - name: return_id
+        description: "Primary key return line item ID."
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key customer ID."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_id
+      - name: stock_code
+        description: "Foreign key product stock code."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: stock_code
