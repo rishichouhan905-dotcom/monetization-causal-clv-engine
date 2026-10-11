@@ -39,42 +39,30 @@ def analyze_clv_heterogeneity(
 
     df = panel_df.copy()
 
-    # Fetch CLV scores to assign customer deciles D01 - D10
-    conn = duckdb.connect(db_path)
-    try:
-        clv_df = conn.execute("SELECT customer_id, clv_12m FROM clv_scores").df()
-    except Exception:
-        clv_df = conn.execute("""
-            SELECT customer_id, SUM(line_total) AS clv_12m
-            FROM fact_orders
-            GROUP BY customer_id
-        """).df()
-    conn.close()
-
-    if len(clv_df) > 0 and "clv_12m" in clv_df.columns:
-        try:
-            clv_df["decile"] = pd.qcut(
-                clv_df["clv_12m"].rank(method="first"),
-                q=10,
-                labels=[f"D{i:02d}" for i in range(1, 11)],
-            )
-        except Exception:
-            clv_df["decile"] = pd.cut(
-                clv_df["clv_12m"], bins=10, labels=[f"D{i:02d}" for i in range(1, 11)]
-            )
-    else:
-        clv_df = pd.DataFrame({"customer_id": df["customer_id"].unique(), "decile": "D01"})
+    # Define customer deciles D01 - D10 strictly from observed pre-period spend (before t_0)
+    pre_spend_df = (
+        df[df["is_post_period"] == 0]
+        .groupby("customer_id")["observed_weekly_spend"]
+        .sum()
+        .reset_index()
+        .rename(columns={"observed_weekly_spend": "pre_spend"})
+    )
+    pre_spend_df["decile"] = pd.qcut(
+        pre_spend_df["pre_spend"].rank(method="first"),
+        q=10,
+        labels=[f"D{i:02d}" for i in range(1, 11)],
+    )
 
     # Merge deciles into panel DataFrame
-    df = df.merge(clv_df[["customer_id", "decile"]], on="customer_id", how="left")
+    df = df.merge(pre_spend_df[["customer_id", "decile"]], on="customer_id", how="left")
     df["decile"] = df["decile"].fillna("D01")
 
     decile_results = []
     unique_deciles = sorted(df["decile"].unique())
 
-    print("\n=================== Causal Heterogeneity by CLV Decile ===================")
-    print(f"{'Decile':<8} | {'Total Cust':<10} | {'Treated':<8} | {'True ATT ($)':<12} | {'TWFE DiD ($)':<14} | {'Std Error':<10} | {'p-value':<9} | {'Degenerate'}")
-    print("-" * 92)
+    print("\n=================== Causal Heterogeneity by Pre-Period Spend Decile ===================")
+    print(f"{'Decile':<8} | {'Total Cust':<10} | {'Treated':<8} | {'True ATT ($)':<12} | {'TWFE DiD ($)':<14} | {'Std Error':<10} | {'p (raw)':<8} | {'p (Bonf)':<8} | {'Degenerate'}")
+    print("-" * 105)
 
     for dec in unique_deciles:
         sub = df[df["decile"] == dec].copy()
@@ -91,6 +79,7 @@ def analyze_clv_heterogeneity(
             did_att = np.nan
             se = np.nan
             pval = np.nan
+            pval_bonf = np.nan
             is_degenerate = True
         else:
             twfe_res = estimate_twfe_did(panel_df=sub, outcome_col=outcome_col)
@@ -98,11 +87,14 @@ def analyze_clv_heterogeneity(
                 did_att = np.nan
                 se = np.nan
                 pval = np.nan
+                pval_bonf = np.nan
                 is_degenerate = True
             else:
                 did_att = float(twfe_res["estimated_att"])
                 se = float(twfe_res["std_err"])
                 pval = float(twfe_res["p_value"])
+                # Bonferroni correction for 10 simultaneous decile hypotheses
+                pval_bonf = min(1.0, pval * 10.0)
                 is_degenerate = False
 
         decile_results.append({
@@ -113,16 +105,18 @@ def analyze_clv_heterogeneity(
             "estimated_did_att": np.round(did_att, 4) if not np.isnan(did_att) else np.nan,
             "std_err": np.round(se, 4) if not np.isnan(se) else np.nan,
             "p_value": np.round(pval, 4) if not np.isnan(pval) else np.nan,
+            "p_value_bonferroni": np.round(pval_bonf, 4) if not np.isnan(pval_bonf) else np.nan,
             "degenerate": is_degenerate,
         })
 
         att_str = f"${did_att:<13.4f}" if not np.isnan(did_att) else "NaN          "
         se_str = f"${se:<9.4f}" if not np.isnan(se) else "NaN      "
         pv_str = f"{pval:.4f}" if not np.isnan(pval) else "NaN   "
+        pv_b_str = f"{pval_bonf:.4f}" if not np.isnan(pval_bonf) else "NaN   "
 
-        print(f"{str(dec):<8} | {int(cust_cnt):<10} | {int(treated_cnt):<8} | ${true_att:<11.4f} | {att_str} | {se_str} | {pv_str:<9} | {is_degenerate}")
+        print(f"{str(dec):<8} | {int(cust_cnt):<10} | {int(treated_cnt):<8} | ${true_att:<11.4f} | {att_str} | {se_str} | {pv_str:<8} | {pv_b_str:<8} | {is_degenerate}")
 
-    print("=" * 92 + "\n")
+    print("=" * 105 + "\n")
 
     res_df = pd.DataFrame(decile_results)
 

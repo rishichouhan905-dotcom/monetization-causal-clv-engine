@@ -162,12 +162,13 @@ def _estimate_twfe_did_sparse(
         (np.ones(len(rows_fe), dtype=np.float64), (rows_fe, cols_fe)),
         shape=(n_rows, n_c + n_w),
     )
-    dof_adj = (n_c / (n_c - 1)) * ((n_rows - 1) / (n_rows - (n_c + n_w)))
+    dof_resid = max(1, n_rows - (n_c + n_w))
+    scale = n_rows / dof_resid
 
-    sol_d = spla.lsqr(X_fe, d, iter_lim=80)
+    sol_d = spla.lsqr(X_fe, d, atol=1e-12, btol=1e-12, iter_lim=500)
     d_tilde = d - X_fe @ sol_d[0]
 
-    sol_y = spla.lsqr(X_fe, y, iter_lim=80)
+    sol_y = spla.lsqr(X_fe, y, atol=1e-12, btol=1e-12, iter_lim=500)
     y_tilde = y - X_fe @ sol_y[0]
 
     denom = np.dot(d_tilde, d_tilde)
@@ -190,7 +191,7 @@ def _estimate_twfe_did_sparse(
     score_it = d_tilde * e
     cust_score = pd.Series(score_it).groupby(c_codes).sum().values
     meat = np.sum(cust_score**2)
-    se = float(np.sqrt(meat / (denom**2) * dof_adj))
+    se = float(np.sqrt(meat / (denom**2) * scale))
 
     ci_lower = tau - 1.95996 * se
     ci_upper = tau + 1.95996 * se

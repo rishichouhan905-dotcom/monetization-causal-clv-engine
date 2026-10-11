@@ -23,7 +23,7 @@ def run_event_study(
     customer_col: str = "customer_id",
     time_col: str = "week_date",
     max_leads: int = 10,
-    max_lags: int = 10,
+    max_lags: int = 26,
     db_path: str = DB_PATH,
 ) -> Dict[str, Any]:
     """Runs event study model, performs joint pre-period parallel trend test, and saves plot.
@@ -36,11 +36,12 @@ def run_event_study(
         customer_col: Customer ID column name.
         time_col: Timestamp column name.
         max_leads: Maximum pre-treatment weeks to evaluate (default 10).
-        max_lags: Maximum post-treatment weeks to evaluate (default 10).
+        max_lags: Maximum post-treatment weeks to evaluate (default 26 to cover all 27 post-weeks).
         db_path: Path to DuckDB database.
 
     Returns:
-        Dictionary with event_study_df, joint_test_stat, joint_test_pval, parallel_trends_pass.
+        Dictionary with event_study_df, joint_test_stat, joint_test_pval, parallel_trends_pass,
+        mean_post_att, mean_post_se, and conclusion_text.
     """
     if panel_df is None:
         conn = duckdb.connect(db_path)
@@ -51,7 +52,7 @@ def run_event_study(
     df[time_col] = pd.to_datetime(df[time_col])
     t0_date = pd.to_datetime(intervention_date)
 
-    # Relative week calculation
+    # Relative week calculation binned across specified lead/lag window
     df["rel_week"] = (df[time_col] - t0_date).dt.days // 7
     df["rel_week"] = np.clip(df["rel_week"], -max_leads, max_lags)
 
@@ -65,27 +66,41 @@ def run_event_study(
     piv = agg.pivot(index="rel_week", columns=treatment_col, values=["mean", "count", "std"])
     piv.columns = [f"{col[0]}_{col[1]}" for col in piv.columns]
 
-    # Dynamic Difference in Differences relative to baseline week k = -1
     diff = piv["mean_1"] - piv["mean_0"]
-    baseline_diff = diff.loc[-1] if -1 in diff.index else 0.0
-    beta_series = diff - baseline_diff
+    v_k = piv["std_1"] ** 2 / piv["count_1"] + piv["std_0"] ** 2 / piv["count_0"]
 
-    # Standard error via delta method on cell sample variances
-    var_k = piv["std_1"] ** 2 / piv["count_1"] + piv["std_0"] ** 2 / piv["count_0"]
-    var_base = var_k.loc[-1] if -1 in var_k.index else 0.0
-    se_series = np.sqrt(var_k + var_base)
-    if -1 in se_series.index:
-        se_series.loc[-1] = 0.0
+    rel_weeks = sorted(piv.index.unique())
+    pre_weeks = [w for w in rel_weeks if w < 0]
+    post_weeks = [w for w in rel_weeks if w >= 0]
+    K = len(pre_weeks)
+
+    # Dynamic Difference in Differences relative to the average of all pre-period weeks
+    if K > 0:
+        base_ref = float(diff.loc[pre_weeks].mean())
+        var_base = float(v_k.loc[pre_weeks].sum() / (K ** 2))
+    else:
+        base_ref = 0.0
+        var_base = 0.0
+
+    beta_series = diff - base_ref
+
+    # Standard error via delta method:
+    # Post-period: Var(beta_w) = Var(diff_w) + Var(base_ref)
+    # Pre-period:  Var(beta_w) = (1 - 2/K)*Var(diff_w) + Var(base_ref)
+    se_series = pd.Series(index=piv.index, dtype=float)
+    for w in rel_weeks:
+        if w >= 0:
+            se_series.loc[w] = float(np.sqrt(v_k.loc[w] + var_base))
+        else:
+            var_w = (1.0 - 2.0 / K) * v_k.loc[w] + var_base if K > 1 else var_base
+            se_series.loc[w] = float(np.sqrt(max(1e-8, var_w)))
 
     event_rows = []
-    rel_weeks = sorted(piv.index.unique())
-    pre_weeks = [w for w in rel_weeks if w < -1]
-
     for w in rel_weeks:
         b_val = float(beta_series.loc[w])
         s_val = float(se_series.loc[w])
-        ci_l = b_val - 1.96 * s_val if w != -1 else 0.0
-        ci_u = b_val + 1.96 * s_val if w != -1 else 0.0
+        ci_l = b_val - 1.96 * s_val
+        ci_u = b_val + 1.96 * s_val
         event_rows.append({
             "rel_week": int(w),
             "beta": b_val,
@@ -97,27 +112,54 @@ def run_event_study(
 
     event_df = pd.DataFrame(event_rows).sort_values("rel_week").reset_index(drop=True)
 
-    # Joint Wald Test for pre-period parallel trends: H_0: beta_k = 0 for all k < -1
-    if len(pre_weeks) > 0:
-        pre_betas = beta_series.loc[pre_weeks].values
-        pre_ses = se_series.loc[pre_weeks].values
-        chi2_stat = float(np.sum((pre_betas / np.maximum(1e-8, pre_ses)) ** 2))
-        dfn = len(pre_weeks)
+    # Joint Wald Test for pre-period parallel trends: H_0: beta_k = 0 for all k in pre_weeks
+    # Since sum(beta_k) = 0 by construction, degrees of freedom df = K - 1
+    if K > 1:
+        test_leads = pre_weeks[:-1]
+        dfn = K - 1
+        b_test = beta_series.loc[test_leads].values
+        Sigma_pre = np.zeros((dfn, dfn))
+        for i in range(dfn):
+            for j in range(dfn):
+                wi, wj = test_leads[i], test_leads[j]
+                if i == j:
+                    Sigma_pre[i, j] = (1.0 - 2.0 / K) * v_k.loc[wi] + var_base
+                else:
+                    Sigma_pre[i, j] = var_base - (v_k.loc[wi] + v_k.loc[wj]) / K
+        chi2_stat = float(b_test @ np.linalg.pinv(Sigma_pre) @ b_test)
         joint_pval = float(1.0 - stats.chi2.cdf(chi2_stat, df=dfn))
     else:
         chi2_stat = 0.0
+        dfn = 1
         joint_pval = 1.0
 
-    parallel_trends_pass = bool(joint_pval > 0.05)
+    parallel_trends_pass = bool(joint_pval >= 0.05)
+
+    # Mean of post-period dynamic coefficients across all 27 post-weeks
+    mean_post_att = float(beta_series.loc[post_weeks].mean()) if len(post_weeks) > 0 else 0.0
+    mean_post_se = float(se_series.loc[post_weeks].mean()) if len(post_weeks) > 0 else 0.0
+
+    # Conditional conclusion text based on p-value
+    if parallel_trends_pass:
+        conclusion_text = (
+            f"[PASS] Pre-trend test fails to reject parallel trends (Chi2 = {chi2_stat:.4f}, df = {dfn}, p = {joint_pval:.4f} >= 0.05). "
+            f"Pre-treatment trajectory differences between treated and control groups are statistically indistinguishable from zero, "
+            f"supporting the parallel trends identifying assumption."
+        )
+    else:
+        conclusion_text = (
+            f"[VIOLATION] Pre-trend test rejects parallel trends (Chi2 = {chi2_stat:.4f}, df = {dfn}, p = {joint_pval:.4e} < 0.05). "
+            f"Statistically significant differential movement exists between treated and control groups prior to policy intervention, "
+            f"indicating confounding or selection bias in treatment assignment."
+        )
 
     print("\n=================== Event Study Leads & Lags Analysis ===================")
     print(f"Policy Date (t_0):                      {intervention_date}")
     print(f"Dependent Variable:                     {outcome_col}")
-    print(f"Joint Pre-Period Parallel Trends Test:  Chi2 = {chi2_stat:.4f} (df={len(pre_weeks)}, p-value = {joint_pval:.4f})")
-    if parallel_trends_pass:
-        print("[PASS] Pre-trend results are consistent with parallel trends (under random assignment this holds by construction).")
-    else:
-        print("[NOTE] Pre-trend results reject parallel trends (indicates confounding or selection bias in assignment).")
+    print(f"Post-Intervention Window:               {len(post_weeks)} weeks (k in [{min(post_weeks)}, {max(post_weeks)}])")
+    print(f"Mean Dynamic Post-Period ATT:           ${mean_post_att:+.4f} (Avg SE = ${mean_post_se:.4f})")
+    print(f"Joint Pre-Period Parallel Trends Test:  Chi2 = {chi2_stat:.4f} (df={dfn}, p-value = {joint_pval:.4f})")
+    print(conclusion_text)
     print("=========================================================================\n")
 
     # Generate Publication-Quality Event Study Plot
@@ -163,12 +205,12 @@ def run_event_study(
         )
 
         # Annotations
-        p_text = f"Pre-trend test: $\\chi^2$={chi2_stat:.2f}, p={joint_pval:.3f}"
-        status_box = "Parallel Trends: PASS" if parallel_trends_pass else "Parallel Trends: CHECK"
+        p_text = f"Pre-trend Wald: $\\chi^2$={chi2_stat:.2f} (df={dfn}), p={joint_pval:.3f}"
+        status_box = "Parallel Trends: PASS" if parallel_trends_pass else "Parallel Trends: VIOLATION"
         ax.text(
             0.03,
             0.92,
-            f"{status_box}\n{p_text}",
+            f"{status_box}\n{p_text}\nMean Post ATT: ${mean_post_att:+.2f}",
             transform=ax.transAxes,
             fontsize=9.5,
             fontweight="semibold",
@@ -178,7 +220,7 @@ def run_event_study(
 
         y_label = "Weekly Winsorized Spend ATT ($)" if "spend" in outcome_col else "Weekly Orders ATT"
         ax.set_title(
-            f"Event Study: Dynamic Treatment Effects Around Policy Rollout\nDependent Variable: {outcome_col}",
+            f"Event Study: Dynamic Treatment Effects Across 27 Post-Weeks\nDependent Variable: {outcome_col}",
             fontsize=13,
             fontweight="bold",
             pad=12,
@@ -203,6 +245,9 @@ def run_event_study(
         "joint_test_stat": chi2_stat,
         "joint_test_pval": joint_pval,
         "parallel_trends_pass": parallel_trends_pass,
+        "mean_post_att": mean_post_att,
+        "mean_post_se": mean_post_se,
+        "conclusion_text": conclusion_text,
     }
 
 

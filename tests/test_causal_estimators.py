@@ -6,12 +6,13 @@ import numpy as np
 import pytest
 import pandas as pd
 
+from linearmodels.panel import PanelOLS
 from causal.evaluation import run_full_causal_evaluation
 from causal.event_study import run_event_study
 from causal.heterogeneity import analyze_clv_heterogeneity
 from causal.refutations import run_placebo_date_refutation, run_leave_one_donor_out_refutation
 from causal.synthetic_control import estimate_synthetic_control
-from causal.twfe_did import estimate_twfe_did
+from causal.twfe_did import estimate_twfe_did, _estimate_twfe_did_sparse
 from clv_causal.config import DB_PATH, PROJECT_ROOT
 
 
@@ -128,3 +129,43 @@ def test_full_causal_evaluation_export() -> None:
     assert "True_ATT" in df.columns
     assert "Cohort" in df.columns
     assert "Outcome_Metric" in df.columns
+
+
+def test_sparse_fallback_vs_panel_ols_subsample() -> None:
+    """Compares the sparse fallback with PanelOLS on a 50,000-row subsample (estimates and SE within 1e-6)."""
+    conn = duckdb.connect(DB_PATH)
+    sub_df = conn.execute("SELECT * FROM causal_experiment_data LIMIT 50000").df()
+    conn.close()
+
+    sub_df["week_date"] = pd.to_datetime(sub_df["week_date"])
+    sub_df["treat_x_post"] = (sub_df["is_treated"] * sub_df["is_post_period"]).astype(float)
+    sub_df["y_it"] = sub_df["observed_weekly_spend_winsor"].astype(float)
+
+    # 1. Fit using linearmodels.PanelOLS
+    df_panel = sub_df.set_index(["customer_id", "week_date"])
+    mod = PanelOLS(
+        df_panel["y_it"],
+        df_panel[["treat_x_post"]],
+        entity_effects=True,
+        time_effects=True,
+        drop_absorbed=True,
+    )
+    panel_res = mod.fit(cov_type="clustered", cluster_entity=True)
+    panel_att = float(panel_res.params["treat_x_post"])
+    panel_se = float(panel_res.std_errors["treat_x_post"])
+
+    # 2. Fit using sparse FWL fallback
+    sparse_res = _estimate_twfe_did_sparse(
+        df=sub_df,
+        outcome_col="observed_weekly_spend_winsor",
+    )
+    sparse_att = float(sparse_res["estimated_att"])
+    sparse_se = float(sparse_res["std_err"])
+
+    # 3. Assert estimates and standard errors match within 1e-6
+    diff_att = abs(sparse_att - panel_att)
+    diff_se = abs(sparse_se - panel_se)
+
+    assert diff_att < 1e-6, f"ATT difference {diff_att:.2e} exceeds 1e-6 tolerance (Sparse={sparse_att}, PanelOLS={panel_att})"
+    assert diff_se < 1e-6, f"SE difference {diff_se:.2e} exceeds 1e-6 tolerance (Sparse={sparse_se}, PanelOLS={panel_se})"
+
