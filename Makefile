@@ -28,7 +28,7 @@ report: check-env results
 	$(PYTHON) scripts/build_clv_report.py
 
 app: check-env
-	streamlit run src/clv_causal/app/main.py
+	$(PYTHON) -m streamlit run src/clv_causal/app/main.py
 
 test: check-env
 	pytest

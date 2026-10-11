@@ -1,48 +1,99 @@
+"""Enterprise Probabilistic CLV & Causal Decision Platform.
+
+Main Streamlit application entry point connecting DuckDB data warehouse,
+BG/NBD and Gamma-Gamma probabilistic CLV distributions, quasi-experimental
+TWFE and event-study causal inference, and executive policy simulations.
+"""
+
 import streamlit as st
-import os
-import sys
 
 from clv_causal.app.components.overview_tab import render_overview_tab
 from clv_causal.app.components.clv_tab import render_clv_tab
 from clv_causal.app.components.causal_tab import render_causal_tab
 from clv_causal.app.components.scenario_tab import render_scenario_tab
 
+# Set wide layout and page metadata
 st.set_page_config(
     page_title="Enterprise Probabilistic CLV & Causal Decision Platform",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-def main():
+# Custom Styling
+st.markdown(
+    """
+    <style>
+    /* Metric Card Styling */
+    div[data-testid="stMetric"] {
+        background-color: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        padding: 14px 18px;
+        border-radius: 10px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    div[data-testid="stMetric"]:hover {
+        border-color: #CBD5E1;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: #475569;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #0F172A;
+    }
+    /* Alert / Callout Box Styling */
+    .stAlert {
+        border-radius: 8px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+def main() -> None:
+    """Main application loop with sidebar navigation across the 4 platform pages."""
     st.sidebar.title("🚀 Enterprise Decision Engine")
-    st.sidebar.caption("Probabilistic CLV & Causal Impact Decision Platform")
-    
-    st.title("📈 Enterprise Probabilistic CLV & Causal Impact Decision Platform")
-    st.markdown("### Connecting authentic transaction data, probabilistic lifetime distributions, quasi-experimental causal inference, and executive decision strategy.")
-    st.markdown("---")
-    
-    tabs = st.tabs([
-        "📊 Executive Overview",
-        "🔮 Probabilistic CLV Studio",
-        "🧪 Causal DiD & Event Study",
-        "🎯 Strategy & Executive Decision Studio"
-    ])
-    
-    with tabs[0]:
-        render_overview_tab()
-        
-    with tabs[1]:
-        render_clv_tab()
-        
-    with tabs[2]:
-        render_causal_tab()
-        
-    with tabs[3]:
-        render_scenario_tab()
-        
+    st.sidebar.caption("Probabilistic CLV & Quasi-Experimental Causal Platform")
+
+    pages = [
+        "📊 Overview",
+        "🔮 CLV Explorer",
+        "🧪 Causal Impact",
+        "🎛️ Policy Simulator",
+    ]
+
+    selected_page = st.sidebar.radio(
+        "Navigation",
+        pages,
+        index=0,
+    )
+
     st.sidebar.markdown("---")
-    st.sidebar.info("💡 **Tech Stack**: DuckDB Analytical Warehouse | Lifetimes (BG/NBD & Gamma-Gamma) | Statsmodels / SciPy Econometrics | Streamlit BI Decision App")
+    st.sidebar.markdown(
+        "### 🏛️ System Architecture\n"
+        "- **Warehouse**: DuckDB Star Schema (`retail_warehouse.duckdb`)\n"
+        "- **CLV Models**: Continuous BG/NBD & Gamma-Gamma (MLE)\n"
+        "- **Econometrics**: PanelOLS DiD & Event Study\n"
+        "- **Policy Engine**: Asymmetric Quintile Simulation\n"
+    )
+    st.sidebar.caption("UCI Online Retail II Authentic Benchmark Engine")
+
+    # Render selected page
+    if selected_page == "📊 Overview":
+        render_overview_tab()
+    elif selected_page == "🔮 CLV Explorer":
+        render_clv_tab()
+    elif selected_page == "🧪 Causal Impact":
+        render_causal_tab()
+    elif selected_page == "🎛️ Policy Simulator":
+        render_scenario_tab()
+
 
 if __name__ == "__main__":
     main()

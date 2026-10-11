@@ -192,3 +192,41 @@ def test_q5_policy_simulator_formula() -> None:
     assert res_52["weeks"] == 52
 
 
+def test_policy_simulator_zero_delta_and_monotonicity() -> None:
+    """Verifies simulator produces zero delta at zero waiver, and is monotonic in waiver share."""
+    from causal.decision_engine import simulate_q5_policy
+
+    # 1. Zero delta at zero waiver share
+    res_zero = simulate_q5_policy(scenario="hidden_degradation", waived_share=0.0)
+    assert res_zero["net_margin_change_central"] == 0.0, "Central net margin must be exactly 0.0 at zero waiver"
+    assert res_zero["net_margin_change_low"] == 0.0, "Low net margin must be exactly 0.0 at zero waiver"
+    assert res_zero["net_margin_change_high"] == 0.0, "High net margin must be exactly 0.0 at zero waiver"
+
+    # 2. Monotonicity in waiver share
+    waiver_shares = [0.0, 0.20, 0.40, 0.60, 0.80, 1.00]
+    sim_results = [
+        simulate_q5_policy(scenario="hidden_degradation", waived_share=w, weeks=27)
+        for w in waiver_shares
+    ]
+
+    margin_changes = [r["net_margin_change_central"] for r in sim_results]
+    retention_effects = [r["q5_retention_effect"] for r in sim_results]
+
+    # In hidden_degradation, ATT_Q5_spend is negative (-$3.26), so waiving fees strictly recovers margin
+    for i in range(len(margin_changes) - 1):
+        assert margin_changes[i] < margin_changes[i + 1], (
+            f"Net margin change should strictly increase with waiver share: "
+            f"share {waiver_shares[i]}={margin_changes[i]} vs share {waiver_shares[i+1]}={margin_changes[i+1]}"
+        )
+
+    # Active share retention effect = (1 - waived_share) * ATT_Q5_active90
+    # Since ATT_Q5_active90 is negative (-3.7%), increasing waiver strictly reduces attrition (moves towards 0.0)
+    for i in range(len(retention_effects) - 1):
+        assert retention_effects[i] < retention_effects[i + 1], (
+            f"Active share retention effect should strictly increase towards 0 with waiver share: "
+            f"share {waiver_shares[i]}={retention_effects[i]} vs share {waiver_shares[i+1]}={retention_effects[i+1]}"
+        )
+    assert retention_effects[-1] == 0.0, "At 100% waiver, retention attrition shock must be 0.0"
+
+
+

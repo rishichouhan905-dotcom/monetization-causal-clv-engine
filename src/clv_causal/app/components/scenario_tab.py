@@ -1,9 +1,11 @@
-"""Streamlit Strategy & Executive Decision Studio Component.
+"""Streamlit Policy Simulator Component.
 
-Renders 4-quadrant strategic customer matrix visualization and interactive
-financial ROI simulator using simulator/margin.py.
+Simulates the financial and customer retention impact of the Q5 fee-waiver intervention policy,
+reusing simulate_q5_policy from decision_engine.py with low/central/high uncertainty bands,
+active share guardrail lights, and extrapolation warnings.
 """
 
+from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
@@ -11,211 +13,275 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from clv_causal.config import DB_PATH, GROSS_MARGIN_PCT
-from simulator.margin import calculate_margin_scenario
+from causal.decision_engine import simulate_q5_policy
+from clv_causal.config import DB_PATH, GROSS_MARGIN_PCT, PROJECT_ROOT
 
 
 def render_scenario_tab() -> None:
-    """Renders the Strategy & Executive Decision Studio tab in Streamlit."""
-    st.markdown("## 🎯 Strategy & Executive Decision Studio")
-    st.caption("Connecting probabilistic CLV predictions and causal impact lifts to 4-quadrant strategic customer segmentation and financial gross margin decisions.")
+    """Renders the Policy Simulator page in Streamlit."""
+    st.markdown("## 🎛️ Policy Simulator: Q5 Fee Waiver & Margin Strategy")
 
-    conn = duckdb.connect(DB_PATH)
-    clv_df: pd.DataFrame = conn.execute("SELECT * FROM pred_clv_summary").df()
-
-    tables = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
-    seg_summary: pd.DataFrame = (
-        conn.execute("SELECT * FROM decision_segment_summary").df()
-        if "decision_segment_summary" in tables
-        else pd.DataFrame()
+    # 1. Mandatory Causal Policy Banner
+    st.warning(
+        "⚠️ **Real transactions (UCI Online Retail II) with a SIMULATED policy**\n\n"
+        "*The evaluated policy is a pricing and bundling change that lifts engagement and purchase frequency for most customers "
+        "(Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5).*"
     )
-    conn.close()
 
-    tab_matrix, tab_sim = st.tabs([
-        "🧩 4-Quadrant Strategic Customer Matrix",
-        "🎛️ Financial Gross Margin & ROI Simulator",
-    ])
+    st.caption(
+        "Calibrate fee exemption waivers for Quintile 5 (top spenders) to mitigate spend compression and preserve active share."
+    )
 
-    with tab_matrix:
-        st.subheader("Strategic Customer Quadrant Segmentation Framework")
-        st.caption("Categorizing customers into actionable strategic buckets based on 12-Month Probabilistic CLV and P(Alive) activity status.")
+    # 2. Controls and Sliders
+    col_c1, col_c2 = st.columns([1, 2])
 
-        if not seg_summary.empty:
-            st.dataframe(
-                seg_summary.style.format(
-                    {
-                        "avg_12m_clv": "${:,.2f}",
-                        "total_12m_clv": "${:,.2f}",
-                        "avg_p_alive": "{:.1%}",
-                        "avg_expected_orders": "{:.2f}",
-                        "pct_of_customers": "{:.1f}%",
-                        "pct_of_portfolio_val": "{:.1f}%",
-                    }
-                ),
-                use_container_width=True,
-            )
+    with col_c1:
+        st.markdown("### ⚙️ Policy Controls")
 
-            st.markdown("---")
-
-            c_l, c_r = st.columns(2)
-            with c_l:
-                fig_cust = px.pie(
-                    seg_summary,
-                    names="strategy_segment",
-                    values="customer_count",
-                    title="Customer Base Share by Strategic Quadrant",
-                    color_discrete_sequence=["#10B981", "#EF4444", "#6366F1", "#9CA3AF"],
-                )
-                fig_cust.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig_cust, use_container_width=True)
-
-            with c_r:
-                fig_val = px.pie(
-                    seg_summary,
-                    names="strategy_segment",
-                    values="total_12m_clv",
-                    title="Portfolio Value Concentration by Strategic Quadrant ($)",
-                    color_discrete_sequence=["#10B981", "#EF4444", "#6366F1", "#9CA3AF"],
-                )
-                fig_val.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig_val, use_container_width=True)
-
-    with tab_sim:
-        st.subheader("Interactive Financial Gross Margin & Campaign Simulator")
-        st.caption("Simulate intervention lifts. Zero slider values strictly yield zero financial delta ($0.00).")
-
-        st.sidebar.markdown("### ⚙️ Financial Scenario Sliders")
-        freq_lift_pct = (
-            st.sidebar.slider(
-                "Order Frequency Lift (%)",
-                min_value=0,
-                max_value=50,
-                value=0,
-                step=1,
-            )
-            / 100.0
-        )
-        aov_lift_pct = (
-            st.sidebar.slider(
-                "Average Order Value (AOV) Lift (%)",
-                min_value=0,
-                max_value=50,
-                value=0,
-                step=1,
-            )
-            / 100.0
-        )
-        p_alive_boost = (
-            st.sidebar.slider(
-                "Retention P(Alive) Boost (+)",
-                min_value=0.00,
-                max_value=0.30,
-                value=0.00,
-                step=0.01,
-            )
-        )
-        gross_margin_pct = (
-            st.sidebar.slider(
-                "Gross Margin Percentage (%)",
-                min_value=10,
-                max_value=80,
-                value=int(GROSS_MARGIN_PCT * 100),
-                step=5,
-            )
-            / 100.0
-        )
-        campaign_cost_per_cust = float(
-            st.sidebar.slider(
-                "Campaign Marketing Cost per Customer ($)",
-                min_value=0.0,
-                max_value=100.0,
-                value=0.0,
-                step=5.0,
-            )
+        selected_scenario = st.selectbox(
+            "Causal Policy Scenario",
+            ["hidden_degradation", "baseline"],
+            index=0,
+            help="Select the stress condition. Hidden Degradation: 40% Q5 churn (~1.9%/week). Baseline: 20% Q5 churn.",
         )
 
-        # Run margin scenario using simulator/margin.py
-        sim_res = calculate_margin_scenario(
-            clv_df=clv_df,
-            freq_lift_pct=freq_lift_pct,
-            aov_lift_pct=aov_lift_pct,
-            p_alive_lift=p_alive_boost,
-            gross_margin_pct=gross_margin_pct,
-            campaign_cost_per_cust=campaign_cost_per_cust,
+        waived_share_pct = st.slider(
+            "Q5 Fee Waiver Share (%)",
+            min_value=0,
+            max_value=100,
+            value=50,
+            step=5,
+            help="Fraction of top-spend (Quintile 5) customers granted fee exemptions.",
+        )
+        waived_share = waived_share_pct / 100.0
+
+        horizon_weeks = st.slider(
+            "Evaluation Horizon (Weeks)",
+            min_value=1,
+            max_value=52,
+            value=27,
+            step=1,
+            help="Simulation horizon in weeks. Capped at 52 weeks. Horizons beyond 27 weeks are an extrapolation of the estimated effect.",
         )
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Baseline Gross Margin", f"${sim_res['total_baseline_margin']:,.2f}")
-        col2.metric(
-            "Simulated Gross Margin",
-            f"${sim_res['total_scenario_margin']:,.2f}",
-            delta=f"${sim_res['total_delta_margin']:+,.2f} Margin Delta",
+        gross_margin_input = st.slider(
+            "Gross Margin (%)",
+            min_value=10,
+            max_value=80,
+            value=int(GROSS_MARGIN_PCT * 100),
+            step=5,
+            help="Product gross margin percentage applied to incremental customer spend (from config).",
         )
-        col3.metric("Campaign Operational Cost", f"${sim_res['total_campaign_cost']:,.2f}")
-        col4.metric(
-            "Net Financial Impact",
-            f"${sim_res['net_financial_impact']:+,.2f}",
-            delta=f"{sim_res['roi_pct']:+.1f}% Campaign ROI" if sim_res['total_campaign_cost'] > 0 else "No Campaign Cost",
+        gross_margin_pct = gross_margin_input / 100.0
+
+    # 3. Horizon Extrapolation Notice
+    if horizon_weeks > 27:
+        st.warning(
+            f"⚠️ **Extrapolation Notice**: Horizon is set to **{horizon_weeks} weeks**. "
+            "Projections beyond 27 weeks are an **extrapolation of the estimated treatment effect**."
+        )
+    else:
+        st.success(
+            f"✅ **Empirically Validated Window**: Evaluation horizon ({horizon_weeks} weeks) is within the "
+            "empirically observed 27-week post-intervention study window."
         )
 
-        st.markdown("---")
+    # 4. Run Policy Simulator via decision_engine.py
+    sim_res = simulate_q5_policy(
+        scenario=selected_scenario,
+        waived_share=waived_share,
+        gross_margin_pct=gross_margin_pct,
+        weeks=horizon_weeks,
+    )
 
-        if abs(sim_res["total_delta_margin"]) < 1e-4:
-            st.success("✅ **Zero-Slider Baseline State**: All lift sliders are set to 0%, resulting in **$0.00 exact margin delta**.")
-        else:
-            st.info(f"💡 **Simulated Intervention Impact**: Lifts yield an incremental **${sim_res['total_delta_margin']:,.2f} in Gross Margin Dollars**.")
+    net_central = sim_res["net_margin_change_central"]
+    net_low = sim_res["net_margin_change_low"]
+    net_high = sim_res["net_margin_change_high"]
+    active_share_effect = sim_res["q5_retention_effect"]
+    n_q5 = sim_res["n_q5"]
 
-        st.markdown("---")
+    with col_c2:
+        st.markdown("### 📊 Simulated Policy Outcomes")
 
-        col_l, col_r = st.columns(2)
+        m1, m2, m3 = st.columns(3)
+        m1.metric(
+            "Net Margin Change (Central)",
+            f"${net_central:+,.2f}",
+            delta="based on the estimated effect",
+            help="Formula: gross_margin * waived_share * N_Q5 * weeks * (-ATT_Q5_spend)",
+        )
+        m2.metric(
+            "95% CI Uncertainty Band",
+            f"${net_low:+,.0f} to ${net_high:+,.0f}",
+            delta="Low / High Bounds",
+            help="Low evaluated at -ci_upper; High evaluated at -ci_lower of ATT_Q5_spend",
+        )
+        m3.metric(
+            "Q5 Active Share Effect",
+            f"{active_share_effect:+.2%}",
+            delta="Preserved Active Share" if waived_share == 1.0 else f"{(1-waived_share)*100:.0f}% Exposure",
+            delta_color="normal" if active_share_effect >= -0.01 else "inverse",
+            help="Formula: (1 - waived_share) * ATT_Q5_active90. Represents change in 90-day active customer share.",
+        )
 
-        with col_l:
-            st.subheader("Baseline vs Simulated Gross Margin ($)")
-            comparison_df = pd.DataFrame({
-                "Scenario": ["Baseline Portfolio Margin", "Simulated Scenario Margin"],
-                "Gross Margin ($)": [sim_res["total_baseline_margin"], sim_res["total_scenario_margin"]],
-            })
-            fig_bar = px.bar(
-                comparison_df,
-                x="Scenario",
-                y="Gross Margin ($)",
-                color="Scenario",
-                text="Gross Margin ($)",
-                color_discrete_map={"Baseline Portfolio Margin": "#64748B", "Simulated Scenario Margin": "#10B981"},
-                title="Portfolio Gross Margin Comparison ($)",
+        st.caption(
+            f"Target Cohort: **{n_q5:,} treated top spenders (Quintile 5)** | "
+            f"Estimated Q5 Spend ATT: **${sim_res['att_q5_spend']:+.2f}/wk** (95% CI: `[${sim_res['ci_lower_spend']:+.2f}, ${sim_res['ci_upper_spend']:+.2f}]`)"
+        )
+
+    st.markdown("---")
+
+    # 5. Uncertainty Message when the band includes zero
+    band_spans_zero = bool(min(net_low, net_high) <= 0.0 <= max(net_low, net_high))
+    if band_spans_zero and waived_share > 0:
+        st.warning(
+            f"⚠️ **Uncertainty Notice**: The 95% confidence interval for net margin change includes zero "
+            f"(${min(net_low, net_high):+,.0f} to ${max(net_low, net_high):+,.0f}). "
+            "Because the confidence band encompasses zero, there is statistical uncertainty whether the fee waiver policy "
+            "yields a net financial gain or loss under estimation error."
+        )
+
+    # 6. Guardrail Lights on the Active Share
+    st.markdown("### 🚦 Active Share Guardrail Monitor")
+    st.caption("Real-time monitoring of customer relationship stability and active share among top spenders (Quintile 5).")
+
+    g_col1, g_col2, g_col3 = st.columns(3)
+
+    if active_share_effect >= -0.005:
+        # Green Guardrail
+        g_col1.success(
+            "🟢 **GREEN GUARDRAIL — Active Share Preserved**\n\n"
+            f"Projected active share change is **{active_share_effect:+.2%}** ($\\ge -0.5\\%$). "
+            "High active share retained among top spenders. Risk of customer alienation is effectively controlled."
+        )
+        g_col2.metric("Active Share Retention", f"{(1.0 + active_share_effect):.1%}")
+        g_col3.metric("Alienation Risk Level", "Minimal (Protected)")
+    elif active_share_effect >= -0.020:
+        # Amber Guardrail
+        g_col1.warning(
+            "🟡 **AMBER GUARDRAIL — Moderate Active Share Impact**\n\n"
+            f"Projected active share change is **{active_share_effect:+.2%}** (between $-0.5\\%$ and $-2.0\\%$). "
+            "Moderate active share erosion observed. Monitor top accounts closely and consider expanding waiver eligibility."
+        )
+        g_col2.metric("Active Share Retention", f"{(1.0 + active_share_effect):.1%}")
+        g_col3.metric("Alienation Risk Level", "Moderate Caution")
+    else:
+        # Red Guardrail
+        g_col1.error(
+            "🔴 **RED GUARDRAIL — High Active Share Degradation**\n\n"
+            f"Projected active share change is **{active_share_effect:+.2%}** ($< -2.0\\%$). "
+            "Severe active share erosion detected among top spenders! We recommend increasing the fee waiver share toward 100%."
+        )
+        g_col2.metric("Active Share Retention", f"{(1.0 + active_share_effect):.1%}")
+        g_col3.metric("Alienation Risk Level", "Critical Degradation")
+
+    st.markdown("---")
+
+    # 7. Interactive Visualizations: Band Chart & Sensitivity Curve
+    col_chart_l, col_chart_r = st.columns(2)
+
+    with col_chart_l:
+        st.subheader("Net Margin Change ($): Low / Central / High Band")
+
+        band_df = pd.DataFrame({
+            "Estimate Tier": [
+                "Low Estimate (Lower CI Bound)",
+                "Central Estimate (based on estimated effect)",
+                "High Estimate (Upper CI Bound)",
+            ],
+            "Net Margin Change ($)": [net_low, net_central, net_high],
+        })
+
+        fig_band = px.bar(
+            band_df,
+            x="Estimate Tier",
+            y="Net Margin Change ($)",
+            text="Net Margin Change ($)",
+            color="Estimate Tier",
+            color_discrete_sequence=["#EF4444", "#4F46E5", "#10B981"],
+            title=f"Net Financial Impact at {waived_share_pct}% Waiver ({horizon_weeks} Weeks)",
+        )
+        fig_band.update_traces(texttemplate="$%{text:+,.0f}", textposition="outside")
+        fig_band.add_hline(y=0, line_dash="solid", line_color="#64748B")
+        fig_band.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20), showlegend=False)
+        st.plotly_chart(fig_band, use_container_width=True)
+
+    with col_chart_r:
+        st.subheader("Sensitivity Across Waiver Share (0% to 100%)")
+
+        sim_curve_shares = np.linspace(0.0, 1.0, 21)
+        sim_curve_results = [
+            simulate_q5_policy(
+                scenario=selected_scenario,
+                waived_share=s,
+                gross_margin_pct=gross_margin_pct,
+                weeks=horizon_weeks,
             )
-            fig_bar.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
-            fig_bar.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_bar, use_container_width=True)
+            for s in sim_curve_shares
+        ]
 
-        with col_r:
-            st.subheader("Payback Horizon Sensitivity (Months)")
-            payback_months = np.linspace(1, 24, 24)
-            monthly_margin_delta = sim_res["total_delta_margin"] / 12.0
-            cum_margin = [monthly_margin_delta * m for m in payback_months]
+        curve_df = pd.DataFrame({
+            "Waiver Share (%)": [s * 100.0 for s in sim_curve_shares],
+            "Net Margin Central ($)": [r["net_margin_change_central"] for r in sim_curve_results],
+            "Net Margin Low ($)": [r["net_margin_change_low"] for r in sim_curve_results],
+            "Net Margin High ($)": [r["net_margin_change_high"] for r in sim_curve_results],
+            "Active Share Impact (%)": [r["q5_retention_effect"] * 100.0 for r in sim_curve_results],
+        })
 
-            fig_line = go.Figure()
-            fig_line.add_trace(go.Scatter(
-                x=payback_months,
-                y=cum_margin,
-                mode="lines+markers",
-                name="Cumulative Incremental Gross Margin ($)",
-                line=dict(color="#10B981", width=3),
-            ))
+        fig_curve = go.Figure()
+        # High bound
+        fig_curve.add_trace(go.Scatter(
+            x=curve_df["Waiver Share (%)"],
+            y=curve_df["Net Margin High ($)"],
+            mode="lines",
+            line=dict(color="rgba(16, 185, 129, 0.4)", width=1, dash="dash"),
+            name="High Bound (Upper CI)",
+        ))
+        # Low bound
+        fig_curve.add_trace(go.Scatter(
+            x=curve_df["Waiver Share (%)"],
+            y=curve_df["Net Margin Low ($)"],
+            mode="lines",
+            fill="tonexty",
+            fillcolor="rgba(79, 70, 229, 0.12)",
+            line=dict(color="rgba(239, 68, 68, 0.4)", width=1, dash="dash"),
+            name="Low Bound (Lower CI)",
+        ))
+        # Central line
+        fig_curve.add_trace(go.Scatter(
+            x=curve_df["Waiver Share (%)"],
+            y=curve_df["Net Margin Central ($)"],
+            mode="lines+markers",
+            line=dict(color="#4F46E5", width=3),
+            name="Central Estimate (based on estimated effect)",
+        ))
+        fig_curve.add_hline(y=0, line_dash="solid", line_color="#64748B")
+        fig_curve.update_layout(
+            title=f"Net Margin Frontier by Waiver Share ({selected_scenario.capitalize()})",
+            xaxis_title="Q5 Waived Share (%)",
+            yaxis_title="Net Margin Change ($)",
+            template="plotly_white",
+            margin=dict(l=20, r=20, t=40, b=20),
+        )
+        st.plotly_chart(fig_curve, use_container_width=True)
 
-            if sim_res["total_campaign_cost"] > 0:
-                fig_line.add_hline(
-                    y=sim_res["total_campaign_cost"],
-                    line_dash="dash",
-                    line_color="#EF4444",
-                    annotation_text=f"Campaign Cost (${sim_res['total_campaign_cost']:,.0f})",
-                )
+    st.markdown("---")
 
-            fig_line.update_layout(
-                title="Cumulative Incremental Gross Margin Payback ($)",
-                xaxis_title="Months Post-Intervention",
-                yaxis_title="Gross Margin ($)",
-                template="plotly_white",
-                margin=dict(l=20, r=20, t=40, b=20),
-            )
-            st.plotly_chart(fig_line, use_container_width=True)
+    # 8. Econometric Specification Documentation
+    st.markdown(
+        """
+        > **Econometric Formula Specification**:
+        > - **Net Margin Change** $= \\text{gross\\_margin} \\times \\text{waived\\_share} \\times N_{\\text{Q5}} \\times \\text{weeks} \\times (-\\text{ATT}_{\\text{Q5\\_spend}})$
+        >   * Evaluated for **Central** ($-\\text{ATT}$), **Low** ($-\\text{CI}_{\\text{upper}}$), and **High** ($-\\text{CI}_{\\text{lower}}$).
+        > - **Q5 Active Share Effect** $= (1 - \\text{waived\\_share}) \\times \\text{ATT}_{\\text{Q5\\_active90}}$
+        > - *Note: No separate CLV term is added to prevent double-counting customer churn and spend degradation.*
+        """
+    )
+
+    st.markdown("---")
+
+    # 9. Page Footer naming exact source tables
+    st.caption(
+        "📂 **Source Tables**: `causal_experiment_data` | "
+        f"**Files**: `results/att_vs_truth_baseline.csv`, `results/att_vs_truth_hidden_degradation.csv`, `config.yaml`"
+    )
