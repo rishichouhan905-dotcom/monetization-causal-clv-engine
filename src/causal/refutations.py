@@ -12,12 +12,13 @@ import pandas as pd
 
 from causal.synthetic_control import solve_donor_weights
 from causal.twfe_did import estimate_twfe_did
-from clv_causal.config import DB_PATH, INTERVENTION_DATE
+from clv_causal.config import DB_PATH, INTERVENTION_DATE, RANDOM_SEED
 
 
 def run_placebo_date_refutation(
     panel_df: Optional[pd.DataFrame] = None,
     actual_t0: str = INTERVENTION_DATE,
+    outcome_col: str = "observed_weekly_spend_winsor",
     db_path: str = DB_PATH,
 ) -> Dict[str, Any]:
     """Runs placebo treatment date refutation test strictly on pre-intervention period.
@@ -25,6 +26,7 @@ def run_placebo_date_refutation(
     Args:
         panel_df: Customer-by-week panel DataFrame.
         actual_t0: Actual policy rollout date ISO string.
+        outcome_col: Dependent variable column name.
         db_path: Path to DuckDB database.
 
     Returns:
@@ -51,15 +53,18 @@ def run_placebo_date_refutation(
 
     pre_df["is_post_period"] = np.where(pre_df["week_date"] >= placebo_t0, 1, 0)
 
-    res = estimate_twfe_did(panel_df=pre_df)
-    placebo_att = float(res["estimated_att"])
-    p_val = float(res["p_value"])
+    res = estimate_twfe_did(panel_df=pre_df, outcome_col=outcome_col)
+    placebo_att = float(res["estimated_att"]) if not np.isnan(res["estimated_att"]) else 0.0
+    se = float(res["std_err"]) if not np.isnan(res["std_err"]) else 0.0
+    p_val = float(res["p_value"]) if not np.isnan(res["p_value"]) else 1.0
     test_passed = bool(p_val > 0.05 or abs(placebo_att) < 0.50)
 
     print("\n=================== Refutation 1: Placebo Treatment Date ===================")
+    print(f"Outcome:                                {outcome_col}")
     print(f"Actual Policy Cutoff (t_0):             {actual_t0}")
     print(f"Placebo Policy Cutoff:                  {placebo_t0.strftime('%Y-%m-%d')}")
     print(f"Placebo ATT Estimate:                   ${placebo_att:+.4f} / week")
+    print(f"Placebo Standard Error:                 ${se:.4f}")
     print(f"Placebo p-value:                        {p_val:.4f}")
     if test_passed:
         print("[PASS] Placebo treatment date yields no statistically significant effect (ATT ~ 0).")
@@ -69,7 +74,7 @@ def run_placebo_date_refutation(
 
     return {
         "placebo_att": placebo_att,
-        "std_err": float(res["std_err"]),
+        "std_err": se,
         "p_value": p_val,
         "test_passed": test_passed,
     }
@@ -78,11 +83,12 @@ def run_placebo_date_refutation(
 def run_leave_one_donor_out_refutation(
     panel_df: Optional[pd.DataFrame] = None,
     intervention_date: str = INTERVENTION_DATE,
-    n_donors: int = 5,
-    outcome_col: str = "observed_weekly_spend",
+    n_donors: int = 50,
+    outcome_col: str = "observed_weekly_spend_winsor",
     treatment_col: str = "is_treated",
     time_col: str = "week_date",
     customer_col: str = "customer_id",
+    random_seed: int = RANDOM_SEED,
     db_path: str = DB_PATH,
 ) -> Dict[str, Any]:
     """Runs leave-one-donor-out sensitivity test for synthetic control.
@@ -90,11 +96,12 @@ def run_leave_one_donor_out_refutation(
     Args:
         panel_df: Customer-by-week panel DataFrame.
         intervention_date: Policy rollout date ISO string.
-        n_donors: Number of donor cohorts.
+        n_donors: Number of donor cohorts (default 50 >= 40).
         outcome_col: Outcome column name.
         treatment_col: Treatment indicator column name.
         time_col: Timestamp column name.
         customer_col: Customer identifier column name.
+        random_seed: Seed for random draws.
         db_path: Path to DuckDB database.
 
     Returns:
@@ -112,37 +119,39 @@ def run_leave_one_donor_out_refutation(
 
     treated_panel = df[df[treatment_col] == 1]
     target_traj = (
-        treated_panel.groupby([time_col, "is_post"])[outcome_col]
+        treated_panel.groupby(time_col)[outcome_col]
         .mean()
-        .reset_index()
-        .sort_values(time_col)
+        .sort_index()
     )
 
     control_panel = df[df[treatment_col] == 0].copy()
     control_custs = np.sort(control_panel[customer_col].unique())
 
-    if len(control_custs) == 0:
+    if len(control_custs) == 0 or len(target_traj) == 0:
         return {"leave_one_out_atts": [], "mean_att": 0.0, "std_att": 0.0, "min_att": 0.0, "max_att": 0.0}
 
-    donor_assignments = {cid: idx % n_donors for idx, cid in enumerate(control_custs)}
+    rng = np.random.default_rng(random_seed)
+    shuffled_custs = rng.permutation(control_custs)
+    actual_n_donors = min(n_donors, len(control_custs))
+    donor_assignments = {cid: idx % actual_n_donors for idx, cid in enumerate(shuffled_custs)}
     control_panel["donor_cohort"] = control_panel[customer_col].map(donor_assignments)
 
     donor_trajs = (
         control_panel.groupby([time_col, "donor_cohort"])[outcome_col]
         .mean()
         .unstack(level="donor_cohort")
-        .reindex(target_traj[time_col])
+        .reindex(target_traj.index)
         .fillna(0.0)
     )
 
-    pre_mask = (target_traj["is_post"] == 0).values
-    post_mask = (target_traj["is_post"] == 1).values
+    pre_weeks = target_traj.index[target_traj.index < t0_date]
+    post_weeks = target_traj.index[target_traj.index >= t0_date]
 
-    y_target_pre = target_traj.loc[pre_mask, outcome_col].values
-    y_target_post = target_traj.loc[post_mask, outcome_col].values
+    y_target_pre = target_traj.loc[pre_weeks].values
+    y_target_post = target_traj.loc[post_weeks].values
 
-    Y_donor_pre = donor_trajs.loc[pre_mask].values
-    Y_donor_post = donor_trajs.loc[post_mask].values
+    Y_donor_pre = donor_trajs.loc[pre_weeks].values
+    Y_donor_post = donor_trajs.loc[post_weeks].values
 
     J = Y_donor_pre.shape[1]
     loo_atts = []

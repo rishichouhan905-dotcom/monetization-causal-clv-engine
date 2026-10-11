@@ -10,11 +10,12 @@ import pandas as pd
 from causal.simulate_policy import get_ground_truth_effects, simulate_policy_intervention
 from clv_causal.config import (
     AOV_CHANGE,
+    CHURN_SCENARIO,
     DB_PATH,
     INTERVENTION_DATE,
     ORDER_RATE_CHANGE,
     RANDOM_SEED,
-    TOP_CLV_CHURN_HAZARD,
+    TOP_SPEND_CHURN_CUMULATIVE,
     TREATMENT_SHARE,
 )
 
@@ -24,7 +25,9 @@ def simulate_causal_intervention(
     treatment_share: float = TREATMENT_SHARE,
     order_rate_change: float = ORDER_RATE_CHANGE,
     aov_change: float = AOV_CHANGE,
-    top_clv_churn_hazard: float = TOP_CLV_CHURN_HAZARD,
+    churn_scenario: str = CHURN_SCENARIO,
+    top_spend_churn_cumulative: float = TOP_SPEND_CHURN_CUMULATIVE,
+    top_clv_churn_hazard: Optional[float] = None,
     random_seed: int = RANDOM_SEED,
     db_path: str = DB_PATH,
     **kwargs,
@@ -36,7 +39,9 @@ def simulate_causal_intervention(
         treatment_share: Fraction of customers randomly assigned to treatment.
         order_rate_change: Relative change in order frequency.
         aov_change: Relative change in average order value.
-        top_clv_churn_hazard: Hazard rate for top CLV quintile churn.
+        churn_scenario: Named churn scenario ('baseline' or 'severe').
+        top_spend_churn_cumulative: Cumulative churn probability over post-period for baseline.
+        top_clv_churn_hazard: Hazard rate for top CLV quintile churn (backwards-compatibility).
         random_seed: Seed for random draws.
         db_path: Path to DuckDB database.
 
@@ -49,8 +54,11 @@ def simulate_causal_intervention(
         treatment_share=treatment_share,
         order_rate_change=order_rate_change,
         aov_change=aov_change,
+        churn_scenario=churn_scenario,
+        top_spend_churn_cumulative=top_spend_churn_cumulative,
         top_clv_churn_hazard=top_clv_churn_hazard,
         random_seed=random_seed,
+        **kwargs,
     )
 
 

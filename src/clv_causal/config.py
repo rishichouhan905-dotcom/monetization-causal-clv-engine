@@ -66,6 +66,10 @@ causal_cfg = CONFIG_DICT.get("causal_model", {})
 TREATMENT_SHARE: float = float(causal_cfg.get("treatment_share", 0.40))
 ORDER_RATE_CHANGE: float = float(causal_cfg.get("order_rate_change", 0.15))
 AOV_CHANGE: float = float(causal_cfg.get("aov_change", 0.10))
+CHURN_SCENARIO: str = str(causal_cfg.get("churn_scenario", "baseline"))
+TOP_SPEND_CHURN_CUMULATIVE: float = float(
+    causal_cfg.get("top_spend_churn_cumulative", causal_cfg.get("top_clv_churn_hazard", 0.20))
+)
 TOP_CLV_CHURN_HAZARD: float = float(causal_cfg.get("top_clv_churn_hazard", 0.20))
 RANDOM_SEED: int = int(causal_cfg.get("random_seed", 42))
 

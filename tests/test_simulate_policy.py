@@ -17,7 +17,7 @@ def test_simulate_policy_intervention_balanced_panel_and_effects() -> None:
     treatment_share = 0.40
     order_rate_change = 0.15
     aov_change = 0.10
-    top_clv_churn_hazard = 0.20
+    top_spend_churn_cumulative = 0.20
     seed = 42
 
     panel_df = simulate_policy_intervention(
@@ -26,7 +26,8 @@ def test_simulate_policy_intervention_balanced_panel_and_effects() -> None:
         treatment_share=treatment_share,
         order_rate_change=order_rate_change,
         aov_change=aov_change,
-        top_clv_churn_hazard=top_clv_churn_hazard,
+        churn_scenario="baseline",
+        top_spend_churn_cumulative=top_spend_churn_cumulative,
         random_seed=seed,
     )
 
@@ -42,14 +43,18 @@ def test_simulate_policy_intervention_balanced_panel_and_effects() -> None:
         "counterfactual_weekly_spend",
         "observed_weekly_orders",
         "observed_weekly_spend",
-        "true_effect_orders",
-        "true_effect_spend",
+        "realized_effect_orders",
+        "realized_effect_spend",
+        "expected_effect_orders",
+        "expected_effect_spend",
         "counterfactual_weekly_spend_winsor",
         "observed_weekly_spend_winsor",
-        "true_effect_spend_winsor",
+        "realized_effect_spend_winsor",
+        "expected_effect_spend_winsor",
         "counterfactual_active_last_90d",
         "observed_active_last_90d",
-        "true_effect_active_last_90d",
+        "realized_effect_active_last_90d",
+        "expected_effect_active_last_90d",
         "weekly_orders",
         "weekly_spend",
         "weekly_spend_winsor",
@@ -76,12 +81,15 @@ def test_simulate_policy_intervention_balanced_panel_and_effects() -> None:
             f"Quintile {q} treatment share {q_share:.4f} deviates from configured {treatment_share}"
         )
 
-    # 5. Check pre-period and control non-interference (true effect must be 0)
+    # 5. Check pre-period and control non-interference (effects must be 0)
     pre_or_control = (panel_df["is_treated"] == 0) | (panel_df["is_post_period"] == 0)
-    assert (panel_df.loc[pre_or_control, "true_effect_orders"] == 0.0).all()
-    assert (panel_df.loc[pre_or_control, "true_effect_spend"] == 0.0).all()
-    assert (panel_df.loc[pre_or_control, "true_effect_spend_winsor"] == 0.0).all()
-    assert (panel_df.loc[pre_or_control, "true_effect_active_last_90d"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "realized_effect_orders"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "expected_effect_orders"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "realized_effect_spend"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "expected_effect_spend"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "realized_effect_spend_winsor"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "expected_effect_spend_winsor"] == 0.0).all()
+    assert (panel_df.loc[pre_or_control, "realized_effect_active_last_90d"] == 0.0).all()
 
     # 6. Check active treated post-t0 zero-week order addition & AOV scaling
     active_tr_zero = (
@@ -129,28 +137,71 @@ def test_simulate_policy_intervention_balanced_panel_and_effects() -> None:
     conn.close()
     assert duck_count == len(panel_df)
 
-    # 10. Check ground truth ATT effects
+    # 10. Check ground truth ATT effects structure
     effects = get_ground_truth_effects(panel_df)
-    assert "weekly_orders" in effects
-    assert "weekly_spend_raw" in effects
-    assert "weekly_spend_winsor" in effects
-    assert "active_last_90d" in effects
-    assert not np.isnan(effects["weekly_orders"])
-    assert not np.isnan(effects["weekly_spend_winsor"])
-    assert not np.isnan(effects["active_last_90d"])
+    assert "overall" in effects
+    assert "q1_to_q4_pooled" in effects
+    assert "q5" in effects
+    for key in ["overall", "q1_to_q4_pooled", "q5"]:
+        for metric in ["realized_orders", "expected_orders", "realized_spend_winsor", "expected_spend_winsor"]:
+            assert not np.isnan(effects[key][metric]), f"NaN found in {key} -> {metric}"
 
 
-def test_simulate_policy_intervention_configurability() -> None:
-    """Tests that changing input effect parameters alters the realized ATT accordingly."""
-    p1 = simulate_policy_intervention(order_rate_change=0.05, aov_change=0.05, random_seed=123)
-    p2 = simulate_policy_intervention(order_rate_change=0.25, aov_change=0.25, random_seed=123)
+def test_simulate_policy_intervention_configurability_and_scenarios() -> None:
+    """Tests that changing input effect parameters alters the realized ATT accordingly, and tests scenarios."""
+    p_base = simulate_policy_intervention(
+        churn_scenario="baseline",
+        top_spend_churn_cumulative=0.20,
+        random_seed=123,
+        persist_to_db=False,
+    )
+    p_severe = simulate_policy_intervention(
+        churn_scenario="severe",
+        random_seed=123,
+        persist_to_db=False,
+    )
 
-    eff1 = get_ground_truth_effects(p1)
-    eff2 = get_ground_truth_effects(p2)
+    eff_base = get_ground_truth_effects(p_base)
+    eff_severe = get_ground_truth_effects(p_severe)
 
-    # In lower quintiles without churn (Q1-Q4), effect must be strictly larger with higher parameters
-    tr_post1_q1 = p1[(p1["is_treated"] == 1) & (p1["is_post_period"] == 1) & (p1["spend_quintile"] == 1)]
-    tr_post2_q1 = p2[(p2["is_treated"] == 1) & (p2["is_post_period"] == 1) & (p2["spend_quintile"] == 1)]
+    # In Q5 (top spend), severe churn (20% weekly) produces significantly lower (more negative) ATT than baseline
+    q5_base_spend = eff_base["q5"]["realized_spend_winsor"]
+    q5_severe_spend = eff_severe["q5"]["realized_spend_winsor"]
+    assert q5_severe_spend < q5_base_spend, (
+        f"Severe churn should produce lower Q5 spend ATT ({q5_severe_spend}) than baseline ({q5_base_spend})"
+    )
 
-    assert tr_post2_q1["true_effect_orders"].mean() > tr_post1_q1["true_effect_orders"].mean()
-    assert tr_post2_q1["true_effect_spend"].mean() > tr_post1_q1["true_effect_spend"].mean()
+
+def test_simulate_policy_hidden_degradation() -> None:
+    """Tests hidden_degradation scenario: cumulative churn 0.40 over post-period (~1.9% per week)."""
+    p_hd = simulate_policy_intervention(
+        churn_scenario="hidden_degradation",
+        random_seed=42,
+        persist_to_db=False,
+    )
+    eff_hd = get_ground_truth_effects(p_hd)
+
+    # Non-churners in Q1-Q4 have positive lift, while Q5 has severe negative degradation
+    q14_spend = eff_hd["q1_to_q4_pooled"]["realized_spend_winsor"]
+    q5_spend = eff_hd["q5"]["realized_spend_winsor"]
+    assert q14_spend > 0, f"Expected positive spend lift in Q1-Q4, got {q14_spend}"
+    assert q5_spend < 0, f"Expected negative spend degradation in Q5, got {q5_spend}"
+    assert eff_hd["q5"]["realized_orders"] < 0, "Expected negative orders in Q5 under hidden_degradation"
+    assert eff_hd["q5"]["realized_active_90d"] < 0, "Expected negative 90-day retention in Q5"
+
+
+def test_simulate_policy_confounded_assignment() -> None:
+    """Tests confounded assignment mode: treatment correlated with pre-period spend growth."""
+    p_conf = simulate_policy_intervention(
+        assignment_mode="confounded",
+        churn_scenario="baseline",
+        random_seed=42,
+        persist_to_db=False,
+    )
+    assert "spend_growth" in p_conf.columns
+    # Check that treated customers have strictly higher mean spend growth than control customers
+    treated_growth = p_conf[p_conf["is_treated"] == 1]["spend_growth"].mean()
+    control_growth = p_conf[p_conf["is_treated"] == 0]["spend_growth"].mean()
+    assert treated_growth > control_growth, (
+        f"Expected treated growth ({treated_growth:.4f}) > control growth ({control_growth:.4f}) in confounded mode"
+    )

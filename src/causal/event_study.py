@@ -2,7 +2,7 @@
 
 Estimates relative week leads and lags relative to policy date t_0, executes
 a joint Wald test for pre-period parallel trends (H_0: beta_k = 0 for k < -1),
-and generates event study plots.
+and generates high-resolution publication-quality event study plots.
 """
 
 from pathlib import Path
@@ -18,7 +18,7 @@ from clv_causal.config import DB_PATH, INTERVENTION_DATE, PROJECT_ROOT
 def run_event_study(
     panel_df: Optional[pd.DataFrame] = None,
     intervention_date: str = INTERVENTION_DATE,
-    outcome_col: str = "observed_weekly_spend",
+    outcome_col: str = "observed_weekly_spend_winsor",
     treatment_col: str = "is_treated",
     customer_col: str = "customer_id",
     time_col: str = "week_date",
@@ -31,7 +31,7 @@ def run_event_study(
     Args:
         panel_df: Customer-by-week panel DataFrame.
         intervention_date: ISO date string for policy date t_0.
-        outcome_col: Outcome column name.
+        outcome_col: Outcome column name (default observed_weekly_spend_winsor).
         treatment_col: Treatment indicator column name.
         customer_col: Customer ID column name.
         time_col: Timestamp column name.
@@ -55,118 +55,140 @@ def run_event_study(
     df["rel_week"] = (df[time_col] - t0_date).dt.days // 7
     df["rel_week"] = np.clip(df["rel_week"], -max_leads, max_lags)
 
-    # Weekly aggregate trajectory per treatment group for clean event-study estimation
-    agg_df = (
-        df.groupby([treatment_col, "rel_week", time_col])[outcome_col]
+    # Cell-weighted summary per treatment group and relative week
+    agg = (
+        df.groupby([treatment_col, "rel_week"])[outcome_col]
         .agg(["mean", "count", "std"])
         .reset_index()
-        .rename(columns={"mean": "avg_spend"})
     )
 
-    # OLS Event Study Regression on relative week dummies
-    # Baseline omitted week is rel_week == -1
-    rel_weeks = sorted([int(w) for w in agg_df["rel_week"].unique() if w != -1])
-    pre_weeks = [w for w in rel_weeks if w < -1]
-    post_weeks = [w for w in rel_weeks if w >= 0]
+    piv = agg.pivot(index="rel_week", columns=treatment_col, values=["mean", "count", "std"])
+    piv.columns = [f"{col[0]}_{col[1]}" for col in piv.columns]
 
-    X_list = [np.ones(len(agg_df)), agg_df[treatment_col].values]
-    cols = ["intercept", "is_treated"]
+    # Dynamic Difference in Differences relative to baseline week k = -1
+    diff = piv["mean_1"] - piv["mean_0"]
+    baseline_diff = diff.loc[-1] if -1 in diff.index else 0.0
+    beta_series = diff - baseline_diff
 
-    for w in rel_weeks:
-        week_dummy = (agg_df["rel_week"] == w).astype(float).values
-        inter_dummy = (agg_df[treatment_col] * (agg_df["rel_week"] == w)).astype(float).values
-        X_list.append(week_dummy)
-        cols.append(f"w_{w}")
-        X_list.append(inter_dummy)
-        cols.append(f"treat_x_w_{w}")
+    # Standard error via delta method on cell sample variances
+    var_k = piv["std_1"] ** 2 / piv["count_1"] + piv["std_0"] ** 2 / piv["count_0"]
+    var_base = var_k.loc[-1] if -1 in var_k.index else 0.0
+    se_series = np.sqrt(var_k + var_base)
+    if -1 in se_series.index:
+        se_series.loc[-1] = 0.0
 
-    X = np.column_stack(X_list)
-    y = agg_df["avg_spend"].values
-
-    XtX_inv = np.linalg.pinv(np.dot(X.T, X))
-    beta = np.dot(XtX_inv, np.dot(X.T, y))
-    residuals = y - np.dot(X, beta)
-    deg_freedom = max(1, len(y) - X.shape[1])
-    sigma_sq = np.sum(residuals**2) / deg_freedom
-    vcov = sigma_sq * XtX_inv
-
-    # Extract interaction estimates and SEs per relative week
     event_rows = []
-    # Baseline omitted week k = -1
-    event_rows.append({"rel_week": -1, "beta": 0.0, "se": 0.0, "ci_lower": 0.0, "ci_upper": 0.0, "is_post": 0})
+    rel_weeks = sorted(piv.index.unique())
+    pre_weeks = [w for w in rel_weeks if w < -1]
 
-    pre_indices = []
     for w in rel_weeks:
-        param_name = f"treat_x_w_{w}"
-        idx = cols.index(param_name)
-        b_val = float(beta[idx])
-        b_se = float(np.sqrt(max(0.0, vcov[idx, idx])))
-        t_crit = float(stats.t.ppf(0.975, df=deg_freedom))
-
-        if w < -1:
-            pre_indices.append(idx)
-
+        b_val = float(beta_series.loc[w])
+        s_val = float(se_series.loc[w])
+        ci_l = b_val - 1.96 * s_val if w != -1 else 0.0
+        ci_u = b_val + 1.96 * s_val if w != -1 else 0.0
         event_rows.append({
-            "rel_week": w,
+            "rel_week": int(w),
             "beta": b_val,
-            "se": b_se,
-            "ci_lower": b_val - t_crit * b_se,
-            "ci_upper": b_val + t_crit * b_se,
+            "se": s_val,
+            "ci_lower": ci_l,
+            "ci_upper": ci_u,
             "is_post": 1 if w >= 0 else 0,
         })
 
     event_df = pd.DataFrame(event_rows).sort_values("rel_week").reset_index(drop=True)
 
-    # Joint Wald Test for pre-period lead coefficients: H_0: beta_k = 0 for all k < -1
-    if len(pre_indices) > 0:
-        beta_pre = beta[pre_indices]
-        vcov_pre = vcov[np.ix_(pre_indices, pre_indices)]
-        vcov_pre_inv = np.linalg.pinv(vcov_pre)
-        joint_stat = float(np.dot(beta_pre.T, np.dot(vcov_pre_inv, beta_pre)) / len(pre_indices))
-        joint_pval = float(1.0 - stats.f.cdf(joint_stat, dfn=len(pre_indices), dfd=deg_freedom))
+    # Joint Wald Test for pre-period parallel trends: H_0: beta_k = 0 for all k < -1
+    if len(pre_weeks) > 0:
+        pre_betas = beta_series.loc[pre_weeks].values
+        pre_ses = se_series.loc[pre_weeks].values
+        chi2_stat = float(np.sum((pre_betas / np.maximum(1e-8, pre_ses)) ** 2))
+        dfn = len(pre_weeks)
+        joint_pval = float(1.0 - stats.chi2.cdf(chi2_stat, df=dfn))
     else:
-        joint_stat = 0.0
+        chi2_stat = 0.0
         joint_pval = 1.0
 
     parallel_trends_pass = bool(joint_pval > 0.05)
 
     print("\n=================== Event Study Leads & Lags Analysis ===================")
     print(f"Policy Date (t_0):                      {intervention_date}")
-    print(f"Joint Pre-Period Parallel Trends Test: F-stat = {joint_stat:.4f} (p-value = {joint_pval:.4f})")
+    print(f"Dependent Variable:                     {outcome_col}")
+    print(f"Joint Pre-Period Parallel Trends Test:  Chi2 = {chi2_stat:.4f} (df={len(pre_weeks)}, p-value = {joint_pval:.4f})")
     if parallel_trends_pass:
-        print("[PASS] Pre-period lead coefficients are jointly zero (statistically parallel baseline).")
+        print("[PASS] Pre-trend results are consistent with parallel trends (under random assignment this holds by construction).")
     else:
-        print("[NOTE] Pre-period lead coefficients indicate non-zero differential baseline movement.")
+        print("[NOTE] Pre-trend results reject parallel trends (indicates confounding or selection bias in assignment).")
     print("=========================================================================\n")
 
-    # Generate Event Study Plot
+    # Generate Publication-Quality Event Study Plot
     results_dir = PROJECT_ROOT / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
 
-        fig, ax = plt.subplots(figsize=(10, 5), dpi=300)
-        ax.axhline(0, color="gray", linestyle="--", linewidth=1.0)
-        ax.axvline(-0.5, color="red", linestyle=":", linewidth=1.5, label="Policy Rollout (t_0)")
+        plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+        fig, ax = plt.subplots(figsize=(11, 5.5), dpi=300)
+
+        # Baseline zero line and rollout dashed line
+        ax.axhline(0, color="#64748b", linestyle="--", linewidth=1.2, alpha=0.8)
+        ax.axvline(-0.5, color="#ef4444", linestyle="-.", linewidth=1.8, label=f"Policy Rollout $t_0$ ({intervention_date})")
+
+        # Shaded confidence band and error bars
+        ax.fill_between(
+            event_df["rel_week"],
+            event_df["ci_lower"],
+            event_df["ci_upper"],
+            color="#3b82f6",
+            alpha=0.15,
+            label="95% Confidence Band",
+        )
 
         ax.errorbar(
             event_df["rel_week"],
             event_df["beta"],
             yerr=1.96 * event_df["se"],
             fmt="o-",
-            color="#2b5c8f",
-            ecolor="#6c9bd2",
-            elinewidth=1.5,
-            capsize=3,
-            label="ATT Dynamic Lead/Lag (95% CI)",
+            color="#1d4ed8",
+            ecolor="#93c5fd",
+            elinewidth=2.0,
+            capsize=4,
+            capthick=1.5,
+            markersize=6,
+            markerfacecolor="#ffffff",
+            markeredgewidth=2.0,
+            markeredgecolor="#1d4ed8",
+            label="Dynamic ATT Estimate ($\\hat{\\beta}_k$)",
         )
 
-        ax.set_title("Event Study: Dynamic Treatment Effects Across Relative Weeks", fontsize=12, fontweight="bold")
-        ax.set_xlabel("Relative Weeks to Policy Intervention (k = 0 at t_0)", fontsize=10)
-        ax.set_ylabel("Weekly Spend ATT ($)", fontsize=10)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="upper left")
+        # Annotations
+        p_text = f"Pre-trend test: $\\chi^2$={chi2_stat:.2f}, p={joint_pval:.3f}"
+        status_box = "Parallel Trends: PASS" if parallel_trends_pass else "Parallel Trends: CHECK"
+        ax.text(
+            0.03,
+            0.92,
+            f"{status_box}\n{p_text}",
+            transform=ax.transAxes,
+            fontsize=9.5,
+            fontweight="semibold",
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#f8fafc", edgecolor="#cbd5e1", alpha=0.9),
+        )
+
+        y_label = "Weekly Winsorized Spend ATT ($)" if "spend" in outcome_col else "Weekly Orders ATT"
+        ax.set_title(
+            f"Event Study: Dynamic Treatment Effects Around Policy Rollout\nDependent Variable: {outcome_col}",
+            fontsize=13,
+            fontweight="bold",
+            pad=12,
+            color="#0f172a",
+        )
+        ax.set_xlabel("Weeks Relative to Policy Intervention ($k = 0$ at rollout week)", fontsize=11, fontweight="medium", labelpad=8)
+        ax.set_ylabel(y_label, fontsize=11, fontweight="medium", labelpad=8)
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(2))
+        ax.grid(True, linestyle=":", alpha=0.6)
+        ax.legend(loc="lower right", frameon=True, framealpha=0.9, facecolor="#ffffff", edgecolor="#e2e8f0", fontsize=9.5)
 
         plot_path = results_dir / "event_study_plot.png"
         fig.tight_layout()
@@ -178,7 +200,7 @@ def run_event_study(
 
     return {
         "event_study_df": event_df,
-        "joint_test_stat": joint_stat,
+        "joint_test_stat": chi2_stat,
         "joint_test_pval": joint_pval,
         "parallel_trends_pass": parallel_trends_pass,
     }

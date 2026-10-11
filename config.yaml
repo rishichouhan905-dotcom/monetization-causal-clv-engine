@@ -25,7 +25,8 @@ causal_model:
   treatment_share: 0.40
   order_rate_change: 0.15
   aov_change: 0.10
-  top_clv_churn_hazard: 0.20
+  churn_scenario: "baseline"
+  top_spend_churn_cumulative: 0.20
   random_seed: 42
 
 decision_engine:

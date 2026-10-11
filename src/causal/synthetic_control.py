@@ -2,7 +2,7 @@
 
 Constructs an optimal synthetic control unit from donor pool cohorts using convex
 optimization (w_j >= 0, sum(w_j) = 1), calculates pre-period RMSPE, and computes
-placebo-in-space permutation p-values.
+placebo-in-space permutation p-values with >= 40 donor cohorts.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
-from clv_causal.config import DB_PATH, INTERVENTION_DATE
+from clv_causal.config import DB_PATH, INTERVENTION_DATE, RANDOM_SEED
 
 
 def solve_donor_weights(
@@ -42,7 +42,9 @@ def solve_donor_weights(
     res = minimize(loss_func, w0, method="SLSQP", bounds=bounds, constraints=constraints)
     weights = res.x if res.success else w0
     weights = np.maximum(0.0, weights)
-    weights /= max(1e-12, np.sum(weights))
+    total_w = float(np.sum(weights))
+    if total_w > 1e-12:
+        weights /= total_w
 
     return weights
 
@@ -50,11 +52,12 @@ def solve_donor_weights(
 def estimate_synthetic_control(
     panel_df: Optional[pd.DataFrame] = None,
     intervention_date: str = INTERVENTION_DATE,
-    n_donors: int = 5,
-    outcome_col: str = "observed_weekly_spend",
+    n_donors: int = 50,
+    outcome_col: str = "observed_weekly_spend_winsor",
     treatment_col: str = "is_treated",
     time_col: str = "week_date",
     customer_col: str = "customer_id",
+    random_seed: int = RANDOM_SEED,
     db_path: str = DB_PATH,
 ) -> Dict[str, Any]:
     """Fits Synthetic Control model, evaluates pre-period RMSPE, and runs placebo-in-space permutations.
@@ -62,11 +65,12 @@ def estimate_synthetic_control(
     Args:
         panel_df: Customer-by-week panel DataFrame.
         intervention_date: Policy rollout date ISO string.
-        n_donors: Number of donor cohorts to partition control customers into.
+        n_donors: Number of donor cohorts to partition control customers into (default 50 >= 40).
         outcome_col: Outcome column name.
         treatment_col: Treatment indicator column name.
         time_col: Week timestamp column name.
         customer_col: Customer identifier column name.
+        random_seed: Seed for reproducible donor assignment.
         db_path: Path to DuckDB database.
 
     Returns:
@@ -82,49 +86,51 @@ def estimate_synthetic_control(
     t0_date = pd.to_datetime(intervention_date)
     df["is_post"] = np.where(df[time_col] >= t0_date, 1, 0)
 
-    # Aggregate target treated trajectory (weekly mean across treated customers)
+    # 1. Aggregate target treated trajectory (weekly mean across treated customers)
     treated_panel = df[df[treatment_col] == 1]
     target_traj = (
-        treated_panel.groupby([time_col, "is_post"])[outcome_col]
+        treated_panel.groupby(time_col)[outcome_col]
         .mean()
-        .reset_index()
-        .sort_values(time_col)
+        .sort_index()
     )
 
-    # Partition control customers into n_donors deterministic donor cohorts
+    # 2. Partition control customers into >= 40 donor cohorts
     control_panel = df[df[treatment_col] == 0].copy()
     control_custs = np.sort(control_panel[customer_col].unique())
 
-    if len(control_custs) == 0:
+    if len(control_custs) == 0 or len(target_traj) == 0:
         return {
             "estimated_att": 0.0,
             "pre_rmspe": 0.0,
             "donor_weights_df": pd.DataFrame(),
             "placebo_pval": 1.0,
             "placebo_effects": [],
+            "degenerate": True,
         }
 
-    # Assign donor cohort ID (0 to n_donors - 1)
-    donor_assignments = {cid: idx % n_donors for idx, cid in enumerate(control_custs)}
+    rng = np.random.default_rng(random_seed)
+    shuffled_custs = rng.permutation(control_custs)
+    actual_n_donors = min(n_donors, len(control_custs))
+    donor_assignments = {cid: idx % actual_n_donors for idx, cid in enumerate(shuffled_custs)}
     control_panel["donor_cohort"] = control_panel[customer_col].map(donor_assignments)
 
     donor_trajs = (
         control_panel.groupby([time_col, "donor_cohort"])[outcome_col]
         .mean()
         .unstack(level="donor_cohort")
-        .reindex(target_traj[time_col])
+        .reindex(target_traj.index)
         .fillna(0.0)
     )
 
     # Split pre and post periods
-    pre_mask = (target_traj["is_post"] == 0).values
-    post_mask = (target_traj["is_post"] == 1).values
+    pre_weeks = target_traj.index[target_traj.index < t0_date]
+    post_weeks = target_traj.index[target_traj.index >= t0_date]
 
-    y_target_pre = target_traj.loc[pre_mask, outcome_col].values
-    y_target_post = target_traj.loc[post_mask, outcome_col].values
+    y_target_pre = target_traj.loc[pre_weeks].values
+    y_target_post = target_traj.loc[post_weeks].values
 
-    Y_donor_pre = donor_trajs.loc[pre_mask].values
-    Y_donor_post = donor_trajs.loc[post_mask].values
+    Y_donor_pre = donor_trajs.loc[pre_weeks].values
+    Y_donor_post = donor_trajs.loc[post_weeks].values
 
     # Optimize weights w_j >= 0, sum(w_j) = 1
     weights = solve_donor_weights(y_target_pre, Y_donor_pre)
@@ -141,20 +147,18 @@ def estimate_synthetic_control(
 
     # Construct Donor Weights Table
     weights_df = pd.DataFrame({
-        "donor_cohort": [f"Donor_Cohort_{j+1}" for j in range(len(weights))],
+        "donor_cohort": [f"Donor_Cohort_{j+1:02d}" for j in range(len(weights))],
         "weight": np.round(weights, 4),
     })
 
-    # Placebo-in-Space Permutation Test across donor cohorts
+    # 3. Placebo-in-Space Permutation Test across donor cohorts
     placebo_effects = []
     J = Y_donor_pre.shape[1]
 
     for j in range(J):
-        # Leave cohort j as pseudo-target
         y_pseudo_pre = Y_donor_pre[:, j]
         y_pseudo_post = Y_donor_post[:, j]
 
-        # Other donors as donor pool
         other_indices = [idx for idx in range(J) if idx != j]
         if len(other_indices) == 0:
             continue
@@ -167,18 +171,23 @@ def estimate_synthetic_control(
         eff_p = float(np.mean(y_pseudo_post - synth_pseudo_post))
         placebo_effects.append(eff_p)
 
-    # Permutation p-value
+    # Permutation p-value: (count(|placebo| >= |att|) + 1) / (J + 1)
     if len(placebo_effects) > 0:
-        placebo_pval = float((np.sum(np.abs(placebo_effects) >= abs(att_synth)) + 1) / (len(placebo_effects) + 1))
+        placebo_pval = float(
+            (np.sum(np.abs(placebo_effects) >= abs(att_synth)) + 1) / (len(placebo_effects) + 1)
+        )
     else:
         placebo_pval = 1.0
 
     print("\n=================== Synthetic Control Estimation Results ===================")
+    print(f"Dependent Variable:                      {outcome_col}")
+    print(f"Number of Donor Cohorts:                {J}")
     print(f"Synthetic Control ATT Estimate:          ${att_synth:+.4f} / week")
     print(f"Pre-Treatment RMSPE:                    ${pre_rmspe:.4f}")
-    print(f"Placebo-in-Space Permutation p-value:    {placebo_pval:.4f}")
-    print("\nDonor Cohort Weights:")
-    print(weights_df.to_string(index=False))
+    print(f"Placebo-in-Space Permutation p-value:    {placebo_pval:.4f} (from {len(placebo_effects)} donor cohorts)")
+    top_donors = weights_df.sort_values(by="weight", ascending=False).head(5)
+    print("\nTop 5 Donor Cohort Weights:")
+    print(top_donors.to_string(index=False))
     print("============================================================================\n")
 
     return {
@@ -187,6 +196,7 @@ def estimate_synthetic_control(
         "donor_weights_df": weights_df,
         "placebo_pval": placebo_pval,
         "placebo_effects": placebo_effects,
+        "degenerate": False,
     }
 
 
