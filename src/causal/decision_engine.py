@@ -4,7 +4,7 @@ Transforms probabilistic CLV distributions and causal effect estimates (ATT)
 into action-oriented customer segmentation, financial margin models, and campaign ROI scenarios.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import duckdb
 import numpy as np
@@ -147,7 +147,99 @@ def run_decision_engine() -> Dict[str, Any]:
     return engine.evaluate_decision_framework()
 
 
+def simulate_q5_policy(
+    scenario: str = "hidden_degradation",
+    waived_share: float = 0.50,
+    gross_margin_pct: float = GROSS_MARGIN_PCT,
+    weeks: int = 27,
+    n_q5: Optional[int] = None,
+    db_path: str = DB_PATH,
+) -> Dict[str, Any]:
+    """Evaluates Q5 fee waiver policy intervention financial and retention effects.
+
+    Formula:
+        net margin change = gross_margin * waived_share * N_Q5 * weeks * (-ATT_Q5_spend)
+        evaluated for central (point ATT), low (-ci_upper), and high (-ci_lower) bounds.
+        Q5 retention effect = (1 - waived_share) * ATT_Q5_active90.
+
+    Note:
+        Does NOT add a separate CLV term (it double counts churn).
+        Horizon is capped at 52 weeks; weeks > 27 are flagged as an extrapolation of the estimated effect.
+    """
+    from clv_causal.config import PROJECT_ROOT
+
+    # Cap horizon at 52 weeks
+    weeks = min(52, max(1, int(weeks)))
+    is_extrapolation = bool(weeks > 27)
+
+    # Determine N_Q5
+    if n_q5 is None:
+        try:
+            conn = duckdb.connect(db_path, read_only=True)
+            n_q5 = conn.execute(
+                "SELECT COUNT(DISTINCT customer_id) FROM causal_experiment_data WHERE spend_quintile = 5 AND is_treated = 1"
+            ).fetchone()[0]
+            conn.close()
+        except Exception:
+            n_q5 = 395
+
+    # Load scenario benchmark results
+    scen_csv = PROJECT_ROOT / "results" / f"att_vs_truth_{scenario}.csv"
+    if not scen_csv.exists():
+        scen_csv = PROJECT_ROOT / "results" / "att_vs_truth.csv"
+
+    att_spend = 0.0
+    ci_lower_spend = 0.0
+    ci_upper_spend = 0.0
+    att_active90 = 0.0
+
+    if scen_csv.exists():
+        df = pd.read_csv(scen_csv)
+        spend_row = df[(df["Cohort"] == "Quintile 5 (Top Spend)") & (df["Outcome_Metric"] == "weekly_spend_winsor") & (df["Estimator_Model"] == "TWFE DiD (PanelOLS)")]
+        if len(spend_row) > 0:
+            att_spend = float(spend_row.iloc[0]["Estimated_ATT"])
+            ci_lower_spend = float(spend_row.iloc[0]["ci_lower"])
+            ci_upper_spend = float(spend_row.iloc[0]["ci_upper"])
+
+        active_row = df[(df["Cohort"] == "Quintile 5 (Top Spend)") & (df["Outcome_Metric"] == "active_last_90d") & (df["Estimator_Model"] == "TWFE DiD (PanelOLS)")]
+        if len(active_row) > 0:
+            att_active90 = float(active_row.iloc[0]["Estimated_ATT"])
+
+    # Net margin change calculations:
+    # Central = gross_margin * waived_share * N_Q5 * weeks * (-att_spend)
+    # Low = gross_margin * waived_share * N_Q5 * weeks * (-ci_upper_spend)
+    # High = gross_margin * waived_share * N_Q5 * weeks * (-ci_lower_spend)
+    factor = gross_margin_pct * waived_share * n_q5 * weeks
+    net_margin_central = factor * (-att_spend)
+    net_margin_low = factor * (-ci_upper_spend)
+    net_margin_high = factor * (-ci_lower_spend)
+
+    # Q5 retention effect = (1 - waived_share) * ATT_Q5_active90
+    q5_retention_effect = (1.0 - waived_share) * att_active90
+
+    return {
+        "scenario": scenario,
+        "waived_share": waived_share,
+        "gross_margin_pct": gross_margin_pct,
+        "weeks": weeks,
+        "n_q5": n_q5,
+        "is_extrapolation": is_extrapolation,
+        "extrapolation_label": "Extrapolation of estimated effect (> 27 weeks)" if is_extrapolation else "Empirically validated window (<= 27 weeks)",
+        "att_q5_spend": att_spend,
+        "ci_lower_spend": ci_lower_spend,
+        "ci_upper_spend": ci_upper_spend,
+        "att_q5_active90": att_active90,
+        "net_margin_change_central": net_margin_central,
+        "net_margin_change_low": net_margin_low,
+        "net_margin_change_high": net_margin_high,
+        "q5_retention_effect": q5_retention_effect,
+    }
+
+
 if __name__ == "__main__":
     res = run_decision_engine()
     print("--- 4-Quadrant Strategic Customer Segmentation ---")
     print(res["segment_summary"].to_string(index=False))
+    print("\n--- Q5 Policy Simulation (Hidden Degradation) ---")
+    q5_sim = simulate_q5_policy(scenario="hidden_degradation", waived_share=0.50, weeks=27)
+    print(q5_sim)

@@ -169,3 +169,26 @@ def test_sparse_fallback_vs_panel_ols_subsample() -> None:
     assert diff_att < 1e-6, f"ATT difference {diff_att:.2e} exceeds 1e-6 tolerance (Sparse={sparse_att}, PanelOLS={panel_att})"
     assert diff_se < 1e-6, f"SE difference {diff_se:.2e} exceeds 1e-6 tolerance (Sparse={sparse_se}, PanelOLS={panel_se})"
 
+
+def test_q5_policy_simulator_formula() -> None:
+    """Tests the Q5 fee-waiver Policy Simulator formula, extrapolation capping, and CI bounds."""
+    from causal.decision_engine import simulate_q5_policy
+
+    res_27 = simulate_q5_policy(scenario="hidden_degradation", waived_share=0.50, weeks=27)
+    assert res_27["is_extrapolation"] is False
+    assert res_27["n_q5"] == 395
+
+    # Central net margin change = gross_margin * waived_share * N_Q5 * weeks * (-ATT_Q5_spend)
+    expected_margin = 0.40 * 0.50 * 395 * 27 * (-res_27["att_q5_spend"])
+    assert abs(res_27["net_margin_change_central"] - expected_margin) < 1e-4
+
+    # Retention effect = (1 - waived_share) * ATT_Q5_active90
+    expected_retention = 0.50 * res_27["att_q5_active90"]
+    assert abs(res_27["q5_retention_effect"] - expected_retention) < 1e-4
+
+    # 52 weeks is flagged as extrapolation
+    res_52 = simulate_q5_policy(scenario="hidden_degradation", waived_share=0.50, weeks=52)
+    assert res_52["is_extrapolation"] is True
+    assert res_52["weeks"] == 52
+
+

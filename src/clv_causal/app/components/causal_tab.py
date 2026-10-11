@@ -32,41 +32,71 @@ def render_causal_tab() -> None:
     policy_date = conn.execute("SELECT DISTINCT week_date FROM causal_experiment_data WHERE is_post_period=1 ORDER BY week_date LIMIT 1").fetchone()
     t0_str = pd.to_datetime(policy_date[0]).strftime("%Y-%m-%d") if policy_date and policy_date[0] else "2010-06-01"
 
-    diag_df = conn.execute("SELECT * FROM causal_treatment_control_diagnostics").df() if "causal_treatment_control_diagnostics" in tables else None
-    event_df = conn.execute("SELECT * FROM causal_event_study_results").df() if "causal_event_study_results" in tables else None
-    eval_df = conn.execute("SELECT * FROM causal_att_vs_truth").df() if "causal_att_vs_truth" in tables else None
-    het_df = conn.execute("SELECT * FROM causal_clv_heterogeneity").df() if "causal_clv_heterogeneity" in tables else None
+    # Scenario Toggle
+    col_scen, col_info = st.columns([2, 3])
+    with col_scen:
+        selected_scenario = st.selectbox(
+            "🎯 Evaluated Causal Policy Scenario",
+            ["baseline", "hidden_degradation"],
+            index=0,
+            help="Toggle between Baseline (20% top-spend cumulative churn) and Hidden Degradation (40% top-spend cumulative churn).",
+        )
+    with col_info:
+        st.info(
+            f"Active Data: **results/att_vs_truth_{selected_scenario}.csv** | "
+            f"Scenario Churn: **{'20% post-period' if selected_scenario == 'baseline' else '40% post-period (~1.9%/wk)'}** on Q5."
+        )
 
-    # Compute dynamic ATT metrics from causal_experiment_data
+    # Load Scenario-Specific Datasets from disk
+    scen_csv = PROJECT_ROOT / "results" / f"att_vs_truth_{selected_scenario}.csv"
+    if scen_csv.exists():
+        eval_df = pd.read_csv(scen_csv)
+    elif "causal_att_vs_truth" in tables:
+        eval_df = conn.execute("SELECT * FROM causal_att_vs_truth").df()
+    else:
+        eval_df = None
+
+    ev_csv = PROJECT_ROOT / "results" / f"event_study_{selected_scenario}.csv"
+    if ev_csv.exists():
+        event_df = pd.read_csv(ev_csv)
+    elif "causal_event_study_results" in tables:
+        event_df = conn.execute("SELECT * FROM causal_event_study_results").df()
+    else:
+        event_df = None
+
+    het_csv = PROJECT_ROOT / "results" / f"heterogeneity_{selected_scenario}.csv"
+    if het_csv.exists():
+        het_df = pd.read_csv(het_csv)
+    elif "causal_clv_heterogeneity" in tables:
+        het_df = conn.execute("SELECT * FROM causal_clv_heterogeneity").df()
+    else:
+        het_df = None
+
+    # Compute dynamic ATT metrics from eval_df
     did_att_val = 0.0
     true_att_val = 0.0
-    if "causal_experiment_data" in tables:
-        att_res = conn.execute("""
-            SELECT
-                AVG(observed_weekly_spend - counterfactual_weekly_spend) AS estimated_att,
-                AVG(true_effect_spend) AS true_att
-            FROM causal_experiment_data
-            WHERE is_post_period = 1 AND is_treated = 1
-        """).fetchone()
-        if att_res and att_res[0] is not None:
-            did_att_val = float(att_res[0])
-            true_att_val = float(att_res[1]) if att_res[1] is not None else did_att_val
+    if eval_df is not None and len(eval_df) > 0:
+        overall_did = eval_df[(eval_df["Cohort"] == "Overall (All Treated)") & (eval_df["Outcome_Metric"] == "weekly_spend_winsor") & (eval_df["Estimator_Model"] == "TWFE DiD (PanelOLS)")]
+        if len(overall_did) > 0:
+            did_att_val = float(overall_did.iloc[0]["Estimated_ATT"])
+            true_att_val = float(overall_did.iloc[0]["True_ATT"])
 
     conn.close()
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Policy Rollout Date (t_0)", t0_str)
-    col2.metric("Randomized Treatment Share", "40.0% (Seeded)")
-    col3.metric("Ground-Truth ATT", f"+${true_att_val:,.4f} / wk")
-    col4.metric("TWFE DiD Estimate", f"+${did_att_val:,.4f} / wk", delta=f"${abs(did_att_val - true_att_val):.4f} Error")
+    col2.metric("Randomized Treatment Share", "40.0% (Stratified)")
+    col3.metric(f"Ground-Truth ATT ({selected_scenario})", f"+${true_att_val:,.4f} / wk")
+    col4.metric(f"TWFE DiD Estimate ({selected_scenario})", f"+${did_att_val:,.4f} / wk", delta=f"${abs(did_att_val - true_att_val):.4f} Error")
 
     st.markdown("---")
 
-    tab_eval, tab_did, tab_synth, tab_refute = st.tabs([
+    tab_eval, tab_did, tab_synth, tab_refute, tab_sim_q5 = st.tabs([
         "📊 Estimated vs True ATT Benchmark Table",
         "📈 Customer TWFE DiD & Event-Study Dynamics",
         "🌍 Convex Synthetic Control",
         "🛡️ Falsification Refutations & Diagnostics",
+        "🎛️ Policy Simulator: Q5 Fee Waiver & Churn",
     ])
 
     with tab_eval:
@@ -113,9 +143,11 @@ def render_causal_tab() -> None:
         # Event Study Leads and Lags Plot
         st.markdown("### 📈 Event-Study Lead & Lag Relative Week Dynamics ($k = t - t_0$)")
 
-        plot_file = PROJECT_ROOT / "results" / "event_study_plot.png"
+        plot_file = PROJECT_ROOT / "results" / f"event_study_plot_{selected_scenario}.png"
+        if not plot_file.exists():
+            plot_file = PROJECT_ROOT / "results" / "event_study_plot.png"
         if plot_file.exists():
-            st.image(str(plot_file), caption="Event Study Leads & Lags Plot (95% Confidence Intervals)", use_container_width=True)
+            st.image(str(plot_file), caption=f"Event Study Leads & Lags Plot - {selected_scenario.capitalize()} (95% CI)", use_container_width=True)
 
         if event_df is not None and len(event_df) > 0:
             y_col = "beta" if "beta" in event_df.columns else ("effect" if "effect" in event_df.columns else event_df.columns[1])
@@ -137,11 +169,11 @@ def render_causal_tab() -> None:
                 ),
                 line=dict(color="#6366F1", width=3),
             ))
-            fig_ev.add_vline(x=-1, line_dash="dash", line_color="gray", annotation_text="Omitted Reference Week (k = -1)")
+            fig_ev.add_vline(x=-1, line_dash="dash", line_color="gray", annotation_text="Pre-Period Mean Reference")
             fig_ev.add_hline(y=0, line_dash="solid", line_color="black")
 
             fig_ev.update_layout(
-                title="Event Study Dynamics: Relative Week Treatment Effects (k = -10 to +10)",
+                title=f"Event Study Dynamics: Relative Week Treatment Effects across 27 Post-Weeks ({selected_scenario})",
                 xaxis_title="Relative Weeks to Policy Rollout (k = t - t_0)",
                 yaxis_title="Weekly Spend ATT ($)",
                 template="plotly_white",
@@ -186,7 +218,7 @@ def render_causal_tab() -> None:
 
         if het_df is not None and len(het_df) > 0:
             st.markdown("---")
-            st.markdown("### 📊 Treatment Effect Heterogeneity by CLV Decile (D01 - D10)")
+            st.markdown(f"### 📊 Treatment Effect Heterogeneity by Observed Pre-Spend Decile ({selected_scenario})")
             st.dataframe(
                 het_df.style.format({
                     "true_att": "${:+.4f}",
@@ -196,3 +228,90 @@ def render_causal_tab() -> None:
                 }),
                 use_container_width=True,
             )
+
+    with tab_sim_q5:
+        st.subheader("🎯 Policy Simulator: Q5 Fee Waiver & Margin Impact")
+        st.caption(
+            "Simulate the financial and retention effects of waiving monetization policy fees for Quintile 5 (top spenders). "
+            f"Active scenario: **{selected_scenario}** (using real saved estimates and CI bounds)."
+        )
+
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1:
+            waived_share = (
+                st.slider(
+                    "Q5 Waived Share (%)",
+                    min_value=0,
+                    max_value=100,
+                    value=50,
+                    step=5,
+                    help="Fraction of top-spend (Q5) customers granted fee exemption.",
+                )
+                / 100.0
+            )
+        with col_s2:
+            weeks = st.slider(
+                "Evaluation Horizon (Weeks)",
+                min_value=1,
+                max_value=52,
+                value=27,
+                step=1,
+                help="Simulation horizon capped at 52 weeks. Horizons beyond 27 weeks extrapolate estimated effects.",
+            )
+        with col_s3:
+            gross_margin_pct = (
+                st.slider(
+                    "Gross Margin (%)",
+                    min_value=10,
+                    max_value=80,
+                    value=40,
+                    step=5,
+                    help="Product gross margin percentage applied to spend.",
+                )
+                / 100.0
+            )
+
+        if weeks > 27:
+            st.warning(f"⚠️ **Extrapolation Notice**: Horizon is set to {weeks} weeks. Projections beyond 27 weeks are an **extrapolation of the estimated treatment effect**.")
+        else:
+            st.success(f"✅ **Empirically Validated Window**: Horizon ({weeks} weeks) is within the evaluated 27-week empirical post-intervention window.")
+
+        from causal.decision_engine import simulate_q5_policy
+
+        sim_res = simulate_q5_policy(
+            scenario=selected_scenario,
+            waived_share=waived_share,
+            gross_margin_pct=gross_margin_pct,
+            weeks=weeks,
+        )
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            "Net Margin Change (Central)",
+            f"${sim_res['net_margin_change_central']:+,.2f}",
+            help="gross_margin * waived_share * N_Q5 * weeks * (-ATT_Q5_spend)",
+        )
+        m2.metric(
+            "95% CI Range (Low to High)",
+            f"${sim_res['net_margin_change_low']:+,.0f} to ${sim_res['net_margin_change_high']:+,.0f}",
+            help="Evaluated at -ci_upper (Low) and -ci_lower (High) of ATT_Q5_spend",
+        )
+        m3.metric(
+            "Q5 90d Retention Effect",
+            f"{sim_res['q5_retention_effect']:+.2%}",
+            help="(1 - waived_share) * ATT_Q5_active90",
+        )
+        m4.metric(
+            "Target Cohort (N_Q5)",
+            f"{sim_res['n_q5']:,} Treated Spenders",
+        )
+
+        st.markdown("---")
+        st.markdown(
+            """
+            > **Econometric Formula Specification**:
+            > - **Net Margin Change** $= \\text{gross\\_margin} \\times \\text{waived\\_share} \\times N_{\\text{Q5}} \\times \\text{weeks} \\times (-\\text{ATT}_{\\text{Q5\\_spend}})$
+            > - **Q5 Retention Effect** $= (1 - \\text{waived\\_share}) \\times \\text{ATT}_{\\text{Q5\\_active90}}$
+            > - *Note: No separate CLV term is added to prevent double-counting customer churn.*
+            """
+        )

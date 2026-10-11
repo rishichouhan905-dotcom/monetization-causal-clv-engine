@@ -27,25 +27,32 @@ from clv_causal.config import DB_PATH, PROJECT_ROOT
 def run_full_causal_evaluation(
     db_path: str = DB_PATH,
     random_seed: int = 42,
+    churn_scenario: str = "baseline",
+    top_spend_churn_cumulative: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Runs all causal estimators and evaluates against ground-truth ATT across outcomes and cohorts.
 
     Args:
         db_path: Absolute path to DuckDB database.
         random_seed: Random seed for simulation and estimators.
+        churn_scenario: Simulation churn scenario ('baseline' or 'hidden_degradation').
+        top_spend_churn_cumulative: Cumulative churn probability over post-period for top spenders.
 
     Returns:
         Dictionary containing evaluation DataFrame, estimator results, and csv_path.
     """
+    if top_spend_churn_cumulative is None:
+        top_spend_churn_cumulative = 0.40 if churn_scenario == "hidden_degradation" else 0.20
+
     print("\n================================================================================")
-    print("           STARTING COMPREHENSIVE CAUSAL EVALUATION & BENCHMARKING               ")
+    print(f"      STARTING CAUSAL EVALUATION & BENCHMARKING (SCENARIO: {churn_scenario.upper()})    ")
     print("================================================================================")
 
-    # 1. Generate & Persist Main Baseline Panel
+    # 1. Generate & Persist Main Panel for this Scenario
     panel_df = simulate_policy_intervention(
         db_path=db_path,
-        churn_scenario="baseline",
-        top_spend_churn_cumulative=0.20,
+        churn_scenario=churn_scenario,
+        top_spend_churn_cumulative=top_spend_churn_cumulative,
         random_seed=random_seed,
     )
 
@@ -194,12 +201,16 @@ def run_full_causal_evaluation(
         })
 
     # --- Event Study (Dynamic Lead/Lag) ---
+    es_plot_name = f"event_study_plot_{churn_scenario}.png"
     es_res = run_event_study(
-        panel_df=panel_df, outcome_col="observed_weekly_spend_winsor"
+        panel_df=panel_df,
+        outcome_col="observed_weekly_spend_winsor",
+        plot_filename=es_plot_name,
     )
     post_es = es_res["event_study_df"][es_res["event_study_df"]["is_post"] == 1]
-    avg_post_es = float(post_es["beta"].mean()) if len(post_es) > 0 else 0.0
+    avg_post_es = float(es_res["mean_post_att"])
     true_spend_win = gt_effects["overall"]["realized_spend_winsor"]
+    post_lin_se = float(es_res["mean_post_se"])
 
     rows.append({
         "Estimator_Model": "Event Study (Dynamic Mean)",
@@ -208,9 +219,9 @@ def run_full_causal_evaluation(
         "Estimated_ATT": avg_post_es,
         "True_ATT": true_spend_win,
         "Absolute_Error": abs(avg_post_es - true_spend_win),
-        "Standard_Error": float(post_es["se"].mean()),
-        "ci_lower": float(post_es["ci_lower"].mean()),
-        "ci_upper": float(post_es["ci_upper"].mean()),
+        "Standard_Error": post_lin_se,
+        "ci_lower": avg_post_es - 1.96 * post_lin_se,
+        "ci_upper": avg_post_es + 1.96 * post_lin_se,
         "p_value": float(es_res["joint_test_pval"]),
         "Status": "DYNAMIC_EVENT_STUDY",
     })
@@ -272,24 +283,36 @@ def run_full_causal_evaluation(
 
     eval_df = pd.DataFrame(rows)
 
-    # 3. Save to results/att_vs_truth.csv
     results_dir = PROJECT_ROOT / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = results_dir / "att_vs_truth.csv"
-    eval_df.to_csv(csv_path, index=False)
-    print(f"\n[OK] Exported comprehensive evaluation table to: {csv_path}")
 
-    # 4. Save to DuckDB
-    try:
-        conn = duckdb.connect(db_path)
-        conn.execute("CREATE OR REPLACE TABLE causal_att_vs_truth AS SELECT * FROM eval_df")
-        conn.close()
-    except Exception as e:
-        print(f"Warning: Failed to save causal_att_vs_truth to DuckDB: {e}")
+    # 3. Save Scenario-Specific Event Study CSV
+    es_csv_path = results_dir / f"event_study_{churn_scenario}.csv"
+    es_res["event_study_df"].to_csv(es_csv_path, index=False)
 
-    # 5. Display Formatted Summary Table
+    # 4. Save Scenario-Specific Decile Heterogeneity CSV
+    het_csv_path = results_dir / f"heterogeneity_{churn_scenario}.csv"
+    het_df.to_csv(het_csv_path, index=False)
+
+    # 5. Save Scenario-Specific Benchmark Evaluation CSV
+    scen_csv_path = results_dir / f"att_vs_truth_{churn_scenario}.csv"
+    eval_df.to_csv(scen_csv_path, index=False)
+    print(f"\n[OK] Exported {churn_scenario} evaluation table to: {scen_csv_path}")
+
+    # If baseline scenario, also write default att_vs_truth.csv and DuckDB table
+    if churn_scenario == "baseline":
+        default_csv = results_dir / "att_vs_truth.csv"
+        eval_df.to_csv(default_csv, index=False)
+        try:
+            conn = duckdb.connect(db_path)
+            conn.execute("CREATE OR REPLACE TABLE causal_att_vs_truth AS SELECT * FROM eval_df")
+            conn.close()
+        except Exception as e:
+            print(f"Warning: Failed to save causal_att_vs_truth to DuckDB: {e}")
+
+    # 6. Display Formatted Summary Table
     print("\n" + "=" * 105)
-    print("                     CAUSAL ESTIMATORS VS. GROUND TRUTH ATT SUMMARY                      ")
+    print(f"          CAUSAL ESTIMATORS VS. GROUND TRUTH ATT SUMMARY (SCENARIO: {churn_scenario.upper()})           ")
     print("=" * 105)
     print(f"{'Estimator / Model':<35} | {'Cohort':<22} | {'Outcome':<18} | {'Est ATT':<10} | {'True ATT':<10} | {'Abs Err':<9} | {'SE':<8} | {'p-val'}")
     print("-" * 105)
@@ -311,7 +334,7 @@ def run_full_causal_evaluation(
 
     return {
         "evaluation_df": eval_df,
-        "csv_path": str(csv_path),
+        "csv_path": str(scen_csv_path),
         "gt_effects": gt_effects,
         "event_res": es_res,
         "sc_res": sc_res,
@@ -320,5 +343,57 @@ def run_full_causal_evaluation(
     }
 
 
+def run_both_causal_scenarios(db_path: str = DB_PATH, random_seed: int = 42) -> Dict[str, Any]:
+    """Runs full causal evaluation for BOTH baseline and hidden_degradation scenarios.
+
+    Saves:
+        - results/att_vs_truth_baseline.csv & results/att_vs_truth_hidden_degradation.csv
+        - results/event_study_baseline.csv & results/event_study_hidden_degradation.csv
+        - results/heterogeneity_baseline.csv & results/heterogeneity_hidden_degradation.csv
+        - results/event_study_plot_baseline.png & results/event_study_plot_hidden_degradation.png
+    Prints single-run TWFE estimates with CIs for Q5 in hidden_degradation.
+    Restores baseline simulation panel in DuckDB.
+    """
+    res_base = run_full_causal_evaluation(
+        db_path=db_path,
+        random_seed=random_seed,
+        churn_scenario="baseline",
+        top_spend_churn_cumulative=0.20,
+    )
+    res_hid = run_full_causal_evaluation(
+        db_path=db_path,
+        random_seed=random_seed,
+        churn_scenario="hidden_degradation",
+        top_spend_churn_cumulative=0.40,
+    )
+
+    # Print single-run TWFE estimates with CIs for Q5 in hidden_degradation
+    df_hid = res_hid["evaluation_df"]
+    q5_hid = df_hid[(df_hid["Cohort"] == "Quintile 5 (Top Spend)") & (df_hid["Estimator_Model"] == "TWFE DiD (PanelOLS)")]
+
+    print("\n=========================================================================================")
+    print("      SINGLE-RUN TWFE ESTIMATES & 95% CONFIDENCE INTERVALS FOR QUINTILE 5 (TOP SPEND)    ")
+    print("                               (SCENARIO: HIDDEN_DEGRADATION)                            ")
+    print("=========================================================================================")
+    print(f"{'Outcome Metric':<25} | {'Estimated ATT':<15} | {'Std Error':<12} | {'95% CI Lower':<14} | {'95% CI Upper':<14} | {'p-value'}")
+    print("-" * 100)
+    for _, row in q5_hid.iterrows():
+        print(
+            f"{row['Outcome_Metric']:<25} | "
+            f"{row['Estimated_ATT']:<+15.4f} | "
+            f"{row['Standard_Error']:<12.4f} | "
+            f"{row['ci_lower']:<+14.4f} | "
+            f"{row['ci_upper']:<+14.4f} | "
+            f"{row['p_value']:.4e}"
+        )
+    print("=========================================================================================\n")
+
+    # Restore DuckDB to baseline simulation panel
+    print("Restoring DuckDB table 'causal_experiment_data' to baseline scenario...")
+    simulate_policy_intervention(db_path=db_path, churn_scenario="baseline", random_seed=random_seed)
+
+    return {"baseline": res_base, "hidden_degradation": res_hid}
+
+
 if __name__ == "__main__":
-    run_full_causal_evaluation()
+    run_both_causal_scenarios()

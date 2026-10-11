@@ -24,6 +24,7 @@ def run_event_study(
     time_col: str = "week_date",
     max_leads: int = 10,
     max_lags: int = 26,
+    plot_filename: str = "event_study_plot.png",
     db_path: str = DB_PATH,
 ) -> Dict[str, Any]:
     """Runs event study model, performs joint pre-period parallel trend test, and saves plot.
@@ -137,14 +138,18 @@ def run_event_study(
 
     # Mean of post-period dynamic coefficients across all 27 post-weeks
     mean_post_att = float(beta_series.loc[post_weeks].mean()) if len(post_weeks) > 0 else 0.0
-    mean_post_se = float(se_series.loc[post_weeks].mean()) if len(post_weeks) > 0 else 0.0
+
+    # Standard error of the linear combination: bar(beta)_post = bar(Delta)_post - bar(Delta)_pre
+    # Var(bar(beta)_post) = Var(bar(Delta)_post) + Var(bar(Delta)_pre) using independent period cell variances
+    var_pre = float(v_k.loc[pre_weeks].sum() / (len(pre_weeks) ** 2)) if len(pre_weeks) > 0 else 0.0
+    var_post = float(v_k.loc[post_weeks].sum() / (len(post_weeks) ** 2)) if len(post_weeks) > 0 else 0.0
+    mean_post_se = float(np.sqrt(var_post + var_pre))
 
     # Conditional conclusion text based on p-value
     if parallel_trends_pass:
         conclusion_text = (
-            f"[PASS] Pre-trend test fails to reject parallel trends (Chi2 = {chi2_stat:.4f}, df = {dfn}, p = {joint_pval:.4f} >= 0.05). "
-            f"Pre-treatment trajectory differences between treated and control groups are statistically indistinguishable from zero, "
-            f"supporting the parallel trends identifying assumption."
+            f"[PASS] Pre-trend test: no evidence against parallel trends (low power; under random assignment this holds by construction) "
+            f"(Chi2 = {chi2_stat:.4f}, df = {dfn}, p = {joint_pval:.4f} >= 0.05)."
         )
     else:
         conclusion_text = (
@@ -157,7 +162,7 @@ def run_event_study(
     print(f"Policy Date (t_0):                      {intervention_date}")
     print(f"Dependent Variable:                     {outcome_col}")
     print(f"Post-Intervention Window:               {len(post_weeks)} weeks (k in [{min(post_weeks)}, {max(post_weeks)}])")
-    print(f"Mean Dynamic Post-Period ATT:           ${mean_post_att:+.4f} (Avg SE = ${mean_post_se:.4f})")
+    print(f"Mean Dynamic Post-Period ATT:           ${mean_post_att:+.4f} (Linear Combination SE = ${mean_post_se:.4f})")
     print(f"Joint Pre-Period Parallel Trends Test:  Chi2 = {chi2_stat:.4f} (df={dfn}, p-value = {joint_pval:.4f})")
     print(conclusion_text)
     print("=========================================================================\n")
@@ -232,9 +237,11 @@ def run_event_study(
         ax.grid(True, linestyle=":", alpha=0.6)
         ax.legend(loc="lower right", frameon=True, framealpha=0.9, facecolor="#ffffff", edgecolor="#e2e8f0", fontsize=9.5)
 
-        plot_path = results_dir / "event_study_plot.png"
+        plot_path = results_dir / plot_filename
         fig.tight_layout()
         fig.savefig(plot_path)
+        if plot_filename != "event_study_plot.png":
+            fig.savefig(results_dir / "event_study_plot.png")
         plt.close(fig)
         print(f"Saved event study plot to: {plot_path}")
     except Exception as e:
