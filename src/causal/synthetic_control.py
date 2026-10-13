@@ -81,7 +81,7 @@ def estimate_synthetic_control(
         panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
         conn.close()
 
-    df = panel_df.copy()
+    df = panel_df[[customer_col, time_col, treatment_col, outcome_col]].copy()
     df[time_col] = pd.to_datetime(df[time_col])
     t0_date = pd.to_datetime(intervention_date)
     df["is_post"] = np.where(df[time_col] >= t0_date, 1, 0)

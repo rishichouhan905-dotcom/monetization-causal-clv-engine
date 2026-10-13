@@ -62,9 +62,18 @@ def run_full_causal_evaluation(
 
     gt_effects = get_ground_truth_effects(panel_df)
 
-    # Sub-panels for cohort evaluations
-    sub_q14 = panel_df[panel_df["spend_quintile"].isin([1, 2, 3, 4])].copy()
-    sub_q5 = panel_df[panel_df["spend_quintile"] == 5].copy()
+    # Sub-panels for cohort evaluations (subset columns to reduce memory)
+    sub_cols = [
+        "customer_id",
+        "week_date",
+        "is_treated",
+        "is_post_period",
+        "observed_weekly_orders",
+        "observed_weekly_spend_winsor",
+        "observed_active_last_90d",
+    ]
+    sub_q14 = panel_df.loc[panel_df["spend_quintile"].isin([1, 2, 3, 4]), sub_cols].copy()
+    sub_q5 = panel_df.loc[panel_df["spend_quintile"] == 5, sub_cols].copy()
 
     # 2. Run Estimators across Outcomes & Cohorts
     rows: List[Dict[str, Any]] = []
@@ -176,6 +185,10 @@ def run_full_causal_evaluation(
                 "Status": "PRIMARY_ESTIMATOR",
             })
 
+    del sub_q14, sub_q5
+    import gc
+    gc.collect()
+
     # --- Synthetic Control Models (50 Donor Cohorts) ---
     for out_col, metric_name, true_metric_key in [
         ("observed_weekly_spend_winsor", "weekly_spend_winsor", "realized_spend_winsor"),
@@ -227,6 +240,7 @@ def run_full_causal_evaluation(
     })
 
     # --- Refutations: Placebo Treatment Date & Leave-One-Donor-Out ---
+    gc.collect()
     ref_res = run_all_refutations(panel_df=panel_df)
     placebo_att = float(ref_res["placebo_date"]["placebo_att"])
     rows.append({
@@ -259,6 +273,7 @@ def run_full_causal_evaluation(
     })
 
     # --- CLV Decile Heterogeneity (D01 - D10) ---
+    gc.collect()
     het_df = analyze_clv_heterogeneity(panel_df=panel_df)
     for _, r in het_df.iterrows():
         dec_att = float(r["estimated_did_att"]) if not np.isnan(r["estimated_did_att"]) else np.nan

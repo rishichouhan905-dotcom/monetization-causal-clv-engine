@@ -23,16 +23,16 @@ def render_causal_tab() -> None:
 
     # 1. Mandatory Causal Policy Banner
     st.warning(
-        "⚠️ **Real transactions (UCI Online Retail II) with a SIMULATED policy**\n\n"
-        "*The evaluated policy is a pricing and bundling change that lifts engagement and purchase frequency for most customers "
-        "(Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5).*"
+        "**Real transactions (UCI Online Retail II) with a SIMULATED policy**\n\n"
+        "The evaluated policy is a pricing and bundling change that lifts engagement and purchase frequency for most customers "
+        "(Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5)."
     )
 
     # 2. Scenario Toggle
     col_scen, col_info = st.columns([2, 3])
     with col_scen:
         selected_scenario = st.selectbox(
-            "🎯 Evaluated Causal Policy Scenario",
+            "Evaluated Causal Policy Scenario",
             ["baseline", "hidden_degradation"],
             index=0,
             help="Baseline: 20% cumulative Q5 churn over post-period. Hidden Degradation: 40% cumulative Q5 churn (~1.9%/week).",
@@ -103,31 +103,32 @@ def render_causal_tab() -> None:
             q5_active_p = float(q5_act_row.iloc[0]["p_value"])
             q5_active_ci = (float(q5_act_row.iloc[0]["ci_lower"]), float(q5_act_row.iloc[0]["ci_upper"]))
 
-    # Summary KPI row
+    q5_active_pp = q5_active_att * 100.0
+    q5_active_ci_pp = (q5_active_ci[0] * 100.0, q5_active_ci[1] * 100.0)
+
+    # Summary KPI row (no decorative arrows on error/SE)
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Policy Rollout Date (t_0)", "2011-06-01", help="Quasi-experimental intervention policy rollout cutoff date.")
     col2.metric(f"Ground-Truth ATT ({selected_scenario})", f"+${true_att_val:,.4f} / wk", help="True average treatment effect on the treated.")
     col3.metric(
-        f"TWFE DiD Spend ATT",
+        "TWFE DiD Spend ATT",
         f"+${did_att_val:,.4f} / wk",
-        delta=f"${abs(did_att_val - true_att_val):.4f} Error",
-        help="Customer-level two-way fixed effects point estimate with customer-clustered SEs.",
+        help=f"Customer-level two-way fixed effects point estimate (Absolute error: ${abs(did_att_val - true_att_val):.4f}).",
     )
     col4.metric(
         "Event Study Dynamic Mean",
         f"+${es_mean_att:,.2f} / wk",
-        delta=f"SE = ${es_mean_se:.2f} (from cov matrix)",
-        help="Mean post-period dynamic effect with standard error computed from the full covariance matrix.",
+        help=f"Mean post-period dynamic effect with linear combination SE = ${es_mean_se:.2f} computed from the full covariance matrix.",
     )
 
     st.markdown("---")
 
     # Main Tabs: Event Study, ATT Benchmark, Q5 Gap & Heterogeneity, Monte Carlo
     tab_es, tab_bench, tab_gap, tab_mc = st.tabs([
-        "📈 Event-Study Plot & Dynamic Dynamics",
-        "📊 ATT Estimates vs. Truth Benchmark Table",
-        "⚡ The Q5 Divergence Gap & Deciles",
-        "🎲 Monte Carlo Coverage & Power (50 Runs)",
+        "Event-Study Dynamics",
+        "ATT Estimates vs. Truth Benchmark",
+        "Q5 Divergence Gap & Deciles",
+        "Monte Carlo Coverage & Power (50 Runs)",
     ])
 
     # Tab 1: Event Study
@@ -137,14 +138,14 @@ def render_causal_tab() -> None:
             "Relative week coefficients $k = t - t_0$ (spanning $k \\in [-10, +26]$) normalized against the pre-period mean reference ($k = -1$)."
         )
 
-        # Callout box on Covariance Matrix Linear Combination SE
+        # Callout box on Covariance Matrix Linear Combination SE (dollars escaped)
         st.info(
-            f"📐 **Event-Study Dynamic Mean ATT**: **+${es_mean_att:,.2f} / week / customer** with "
-            f"**Linear Combination Standard Error = ${es_mean_se:.2f}** "
+            f"**Event-Study Dynamic Mean ATT**: **+\\${es_mean_att:,.2f} / week / customer** with "
+            f"**Linear Combination Standard Error = \\${es_mean_se:.2f}** "
             f"computed from the **full covariance matrix** "
-            f"($\\text{{Var}}(\\bar{{\\beta}}_{{post}}) = \\text{{Var}}(\\bar{{\\Delta}}_{{post}}) + \\text{{Var}}(\\bar{{\\Delta}}_{{pre}})$).\n\n"
-            f"🛡️ **Pre-Trend Wald Test**: Joint $\\chi^2 = 6.53$ (df=9, $p = {es_pval:.3f} \\ge 0.05$). "
-            f"**No evidence against parallel trends (low power; under random assignment this holds by construction)**."
+            f"($\\text{{SE}} = \\sqrt{{\\mathbf{{w}}^T \\boldsymbol{{\\Sigma}}_{{post}} \\mathbf{{w}}}}$).\n\n"
+            f"**Pre-Trend Wald Test**: Joint $\\chi^2 = 6.53$ (df=9, p = {es_pval:.3f} $\\ge 0.05$). "
+            "**No evidence against parallel trends (low power; under random assignment this holds by construction)**."
         )
 
         if not event_df.empty:
@@ -202,11 +203,11 @@ def render_causal_tab() -> None:
         st.caption("Comparing PanelOLS TWFE, Synthetic Control, and Dynamic Event-Study against authentic realized ground truth.")
 
         if not eval_df.empty:
-            # Highlight Q5 active 90d result
+            # Highlight Q5 active 90d result with exact requested wording and pp formatting
             st.markdown(
-                f"💡 **Q5 Active-90 Result**: Under this draw of `{selected_scenario}`, the top-quintile active share change is "
-                f"**{q5_active_att:+.2%}** ($p = {q5_active_p:.4f}$, 95% CI: `[{q5_active_ci[0]:+.2%}, {q5_active_ci[1]:+.2%}]`), "
-                f"which is **borderline in this draw, power about 70% in Monte Carlo**."
+                f"**Q5 Active-90 Result**: Under this draw of `{selected_scenario}`, the top-quintile active share change is "
+                f"**{q5_active_pp:+.2f} pp** (p = {q5_active_p:.4f}, 95% CI: `[{q5_active_ci_pp[0]:+.2f} pp, {q5_active_ci_pp[1]:+.2f} pp]`), "
+                "which is **borderline in this draw, power about 70% in Monte Carlo**."
             )
 
             st.dataframe(
@@ -227,7 +228,7 @@ def render_causal_tab() -> None:
             # Download CSV Button
             csv_bytes = eval_df.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label=f"📥 Download results/att_vs_truth_{selected_scenario}.csv",
+                label=f"Download results/att_vs_truth_{selected_scenario}.csv",
                 data=csv_bytes,
                 file_name=f"att_vs_truth_{selected_scenario}.csv",
                 mime="text/csv",
@@ -237,7 +238,7 @@ def render_causal_tab() -> None:
 
     # Tab 3: The Q5 Gap & Heterogeneity
     with tab_gap:
-        st.subheader("⚡ The Q5 Divergence Gap: General Customers vs. Top Spenders")
+        st.subheader("The Q5 Divergence Gap: General Customers vs. Top Spenders")
         st.caption(
             "The monetization policy creates an asymmetric impact: engagement and spend lift across lower quintiles (Q1–Q4), "
             "contrasted with churn and spend compression in Quintile 5 (top spenders)."
@@ -266,17 +267,19 @@ def render_causal_tab() -> None:
                     st.plotly_chart(fig_gap_spend, use_container_width=True)
 
                 with col_g2:
+                    act_gap = gap_data[gap_data["Outcome_Metric"] == "active_last_90d"].copy()
+                    act_gap["att_pp"] = act_gap["Estimated_ATT"] * 100.0
                     fig_gap_act = px.bar(
-                        gap_data[gap_data["Outcome_Metric"] == "active_last_90d"],
+                        act_gap,
                         x="Cohort",
-                        y="Estimated_ATT",
+                        y="att_pp",
                         color="Cohort",
-                        text="Estimated_ATT",
-                        title="Active Share Change: Q1-Q4 vs. Q5",
+                        text="att_pp",
+                        title="Active Share Change (pp): Q1-Q4 vs. Q5",
                         color_discrete_map={"Q1-Q4 Pooled": "#10B981", "Quintile 5 (Top Spend)": "#EF4444"},
                     )
-                    fig_gap_act.update_traces(texttemplate="%{text:+.2%}", textposition="outside")
-                    fig_gap_act.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
+                    fig_gap_act.update_traces(texttemplate="%{text:+.2f} pp", textposition="outside")
+                    fig_gap_act.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20), yaxis_title="Active Share ATT (pp)")
                     st.plotly_chart(fig_gap_act, use_container_width=True)
 
         if not het_df.empty:
@@ -293,16 +296,16 @@ def render_causal_tab() -> None:
 
     # Tab 4: Monte Carlo
     with tab_mc:
-        st.subheader("🎲 Monte Carlo Validation Across 50 Independent Replications")
+        st.subheader("Monte Carlo Validation Across 50 Independent Replications")
         st.caption(
             "Empirical verification of unbiasedness, root mean squared error, empirical coverage, and statistical test power at 5%."
         )
 
         st.markdown(
-            "> **Key Monte Carlo Findings**:\n"
-            "> - **Empirical Coverage**: Ranges from **92% to 100%** across cells (consistent with nominal 95% within $\\pm 3$ percentage points Monte Carlo error with 50 replications).\n"
-            "> - **Q5 Active-90 Statistical Power**: The power to detect top-quintile active share degradation at $\\alpha = 0.05$ is **about 70% in Monte Carlo**.\n"
-            "> - **Zero Unbiased Estimator**: Mean bias for TWFE DiD across replications is $<\$0.02$, confirming estimator consistency."
+            "**Key Monte Carlo Findings**:\n"
+            "- **Empirical Coverage**: Ranges from **92% to 100%** across cells (consistent with nominal 95% within $\\pm 3$ percentage points Monte Carlo error with 50 replications).\n"
+            "- **Q5 Active-90 Statistical Power**: The power to detect top-quintile active share degradation at $\\alpha = 0.05$ is **about 70% in Monte Carlo**.\n"
+            "- **Zero Unbiased Estimator**: Mean bias for TWFE DiD across replications is $<\\$0.02$, confirming estimator consistency."
         )
 
         if not mc_df.empty:
@@ -324,7 +327,7 @@ def render_causal_tab() -> None:
 
     # Page Footer naming exact source tables
     st.caption(
-        "📂 **Source Tables**: `causal_experiment_data` | "
+        "**Source Tables**: `causal_experiment_data` | "
         f"**Files**: `results/att_vs_truth_{selected_scenario}.csv`, `results/event_study_{selected_scenario}.csv`, "
         f"`results/heterogeneity_{selected_scenario}.csv`, `results/monte_carlo.csv`"
     )

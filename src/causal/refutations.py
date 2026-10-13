@@ -37,14 +37,18 @@ def run_placebo_date_refutation(
         panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
         conn.close()
 
-    df = panel_df.copy()
-    df["week_date"] = pd.to_datetime(df["week_date"])
     actual_t0_date = pd.to_datetime(actual_t0)
-
-    # Filter strictly to pre-intervention data
-    pre_df = df[df["week_date"] < actual_t0_date].copy()
-    if len(pre_df) == 0:
+    w_dates = pd.to_datetime(panel_df["week_date"])
+    pre_mask = w_dates < actual_t0_date
+    if not pre_mask.any():
         return {"placebo_att": 0.0, "std_err": 0.0, "p_value": 1.0, "test_passed": True}
+
+    pre_df = pd.DataFrame({
+        "customer_id": panel_df.loc[pre_mask, "customer_id"].values,
+        "week_date": w_dates[pre_mask].values,
+        "is_treated": panel_df.loc[pre_mask, "is_treated"].values,
+        outcome_col: panel_df.loc[pre_mask, outcome_col].values,
+    })
 
     # Select midpoint of pre-intervention window as placebo date t0_placebo
     min_date = pre_df["week_date"].min()
@@ -112,19 +116,26 @@ def run_leave_one_donor_out_refutation(
         panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
         conn.close()
 
-    df = panel_df.copy()
-    df[time_col] = pd.to_datetime(df[time_col])
     t0_date = pd.to_datetime(intervention_date)
-    df["is_post"] = np.where(df[time_col] >= t0_date, 1, 0)
+    w_dates = pd.to_datetime(panel_df[time_col])
 
-    treated_panel = df[df[treatment_col] == 1]
+    tr_mask = panel_df[treatment_col] == 1
+    tr_df = pd.DataFrame({
+        time_col: w_dates[tr_mask].values,
+        outcome_col: panel_df.loc[tr_mask, outcome_col].values,
+    })
     target_traj = (
-        treated_panel.groupby(time_col)[outcome_col]
+        tr_df.groupby(time_col)[outcome_col]
         .mean()
         .sort_index()
     )
 
-    control_panel = df[df[treatment_col] == 0].copy()
+    ctrl_mask = panel_df[treatment_col] == 0
+    control_panel = pd.DataFrame({
+        customer_col: panel_df.loc[ctrl_mask, customer_col].values,
+        time_col: w_dates[ctrl_mask].values,
+        outcome_col: panel_df.loc[ctrl_mask, outcome_col].values,
+    })
     control_custs = np.sort(control_panel[customer_col].unique())
 
     if len(control_custs) == 0 or len(target_traj) == 0:

@@ -39,10 +39,12 @@ def estimate_twfe_did(
     """
     if panel_df is None:
         conn = duckdb.connect(db_path)
-        panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
+        df = conn.execute(f"SELECT {customer_col}, {time_col}, {treatment_col}, {post_col}, {outcome_col} FROM causal_experiment_data").df()
         conn.close()
+    else:
+        req_cols = [customer_col, time_col, treatment_col, post_col, outcome_col]
+        df = panel_df[req_cols].copy()
 
-    df = panel_df.copy()
     df[time_col] = pd.to_datetime(df[time_col])
 
     # Construct treatment interaction term D_it = is_treated * is_post_period
@@ -66,18 +68,31 @@ def estimate_twfe_did(
             "degenerate": True,
         }
 
+    # For large panels (N > 100_000), PanelOLS exhausts memory constructing dense projection matrices.
+    # Route directly to the mathematically equivalent memory-efficient sparse FWL solver.
+    if N > 100_000:
+        return _estimate_twfe_did_sparse(
+            df=df,
+            outcome_col=outcome_col,
+            treatment_col=treatment_col,
+            post_col=post_col,
+            customer_col=customer_col,
+            time_col=time_col,
+        )
+
     # Prepare MultiIndex panel dataframe for linearmodels
-    df_panel = df.set_index([customer_col, time_col])
+    df_panel = df[[customer_col, time_col, "treat_x_post", "y_it"]].set_index([customer_col, time_col])
 
     try:
         mod = PanelOLS(
+
             dependent=df_panel["y_it"],
             exog=df_panel[["treat_x_post"]],
             entity_effects=True,
             time_effects=True,
             drop_absorbed=True,
         )
-        res = mod.fit(cov_type="clustered", cluster_entity=True)
+        res = mod.fit(cov_type="clustered", cluster_entity=True, low_memory=True)
 
         att = float(res.params["treat_x_post"])
         se = float(res.std_errors["treat_x_post"])
@@ -88,6 +103,9 @@ def estimate_twfe_did(
         degenerate = False
     except Exception as e:
         print(f"PanelOLS fitting encountered {e}; invoking memory-efficient sparse FWL solver...")
+        del df_panel
+        import gc
+        gc.collect()
         try:
             return _estimate_twfe_did_sparse(
                 df=df,
@@ -99,6 +117,7 @@ def estimate_twfe_did(
             )
         except Exception as sparse_e:
             print(f"Sparse TWFE fallback error: {sparse_e}")
+
             return {
                 "estimated_att": np.nan,
                 "std_err": np.nan,
@@ -156,20 +175,26 @@ def _estimate_twfe_did_sparse(
     n_c = len(c_unq)
     n_w = len(w_unq)
 
-    cols_fe = np.column_stack([c_codes, n_c + w_codes]).ravel()
-    rows_fe = np.repeat(np.arange(n_rows), 2)
-    X_fe = sp.csr_matrix(
-        (np.ones(len(rows_fe), dtype=np.float64), (rows_fe, cols_fe)),
-        shape=(n_rows, n_c + n_w),
-    )
-    dof_resid = max(1, n_rows - (n_c + n_w))
+    # Exact zero-memory Frisch-Waugh-Lovell alternating within projection
+    c_cnt = np.bincount(c_codes)
+    w_cnt = np.bincount(w_codes)
+
+    def _demean_2way(v: np.ndarray, tol: float = 1e-12, max_iter: int = 100) -> np.ndarray:
+        v_res = v.copy()
+        for _ in range(max_iter):
+            v_old = v_res.copy()
+            v_res -= (np.bincount(c_codes, weights=v_res) / c_cnt)[c_codes]
+            v_res -= (np.bincount(w_codes, weights=v_res) / w_cnt)[w_codes]
+            if np.max(np.abs(v_res - v_old)) < tol:
+                break
+        return v_res
+
+    d_tilde = _demean_2way(d)
+    y_tilde = _demean_2way(y)
+
+    extra_df = n_c + n_w - 1
+    dof_resid = max(1, n_rows - extra_df - 1)
     scale = n_rows / dof_resid
-
-    sol_d = spla.lsqr(X_fe, d, atol=1e-12, btol=1e-12, iter_lim=500)
-    d_tilde = d - X_fe @ sol_d[0]
-
-    sol_y = spla.lsqr(X_fe, y, atol=1e-12, btol=1e-12, iter_lim=500)
-    y_tilde = y - X_fe @ sol_y[0]
 
     denom = np.dot(d_tilde, d_tilde)
     if denom <= 1e-12:
@@ -188,8 +213,7 @@ def _estimate_twfe_did_sparse(
     tau = float(np.dot(d_tilde, y_tilde) / denom)
     e = y_tilde - tau * d_tilde
 
-    score_it = d_tilde * e
-    cust_score = pd.Series(score_it).groupby(c_codes).sum().values
+    cust_score = np.bincount(c_codes, weights=d_tilde * e)
     meat = np.sum(cust_score**2)
     se = float(np.sqrt(meat / (denom**2) * scale))
 

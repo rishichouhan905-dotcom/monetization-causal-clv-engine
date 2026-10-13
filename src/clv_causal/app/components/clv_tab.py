@@ -2,12 +2,11 @@
 
 Renders lifetime value distributions, P(Alive) histogram, CLV by segment,
 single-customer lookup with 95% bootstrap confidence intervals,
-and out-of-sample holdout validation tables from holdout_report.md.
+and out-of-sample holdout validation tables comparing BG/NBD vs. Carry-Forward baselines.
 """
 
 from pathlib import Path
-import re
-from typing import Dict, List
+from typing import List
 import duckdb
 import numpy as np
 import pandas as pd
@@ -48,7 +47,7 @@ def _extract_markdown_tables_from_report(report_path: Path) -> List[pd.DataFrame
             header = [c.strip().replace("**", "").replace("$", "") for c in blk[0].split("|")[1:-1]]
             rows = []
             for l in blk[2:]:
-                r = [c.strip().replace("**", "") for c in l.split("|")[1:-1]]
+                r = [c.strip().replace("**", "").replace("$", "") for c in l.split("|")[1:-1]]
                 if len(r) == len(header):
                     rows.append(r)
             if rows:
@@ -84,33 +83,69 @@ def render_clv_tab() -> None:
         else pd.DataFrame()
     )
 
-    decile_db_df: pd.DataFrame = (
-        conn.execute("SELECT * FROM clv_holdout_deciles").df()
-        if "clv_holdout_deciles" in tables
-        else pd.DataFrame()
-    )
+    total_dim_cust: int = conn.execute("SELECT COUNT(*) FROM dim_customers").fetchone()[0]
+    scored_cust_count: int = len(clv_df)
+    returns_only_count: int = total_dim_cust - scored_cust_count
+
     conn.close()
 
-    # Top KPI Metrics Cards
+    # Top KPI Metrics Cards (no decorative arrows on MAE or counts)
     col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Mean 12-Month CLV", f"${clv_df['clv_12m'].mean():,.2f}")
-    col_b.metric("Portfolio 12M CLV Sum", f"${clv_df['clv_12m'].sum():,.0f}")
-    col_c.metric("Active Ratio P(Alive) > 80%", f"{(clv_df['p_alive'] > 0.8).mean()*100:.1f}%")
+    col_a.metric(
+        "Mean 12-Month CLV",
+        f"${clv_df['clv_12m'].mean():,.2f}",
+        help=f"Evaluated across {scored_cust_count:,} scored customers.",
+    )
+    col_b.metric(
+        "Portfolio 12M CLV Sum",
+        f"${clv_df['clv_12m'].sum():,.0f}",
+        help=f"Total forward 12-month gross revenue projection across {scored_cust_count:,} scored customers.",
+    )
+    col_c.metric(
+        "Active Ratio P(Alive) > 80%",
+        f"{(clv_df['p_alive'] > 0.8).mean()*100:.1f}%",
+        help="Proportion of scored customer portfolio with active probability exceeding 80%.",
+    )
     if not val_metrics.empty:
         r_val = float(val_metrics["pearson_r"].iloc[0])
         mae_val = float(val_metrics["mae_purchases"].iloc[0] if "mae_purchases" in val_metrics.columns else val_metrics["mae"].iloc[0])
-        col_d.metric("Holdout Purchase MAE", f"{mae_val:.4f} orders", delta=f"r = {r_val:.4f}" if not np.isnan(r_val) else "Verified")
+        col_d.metric(
+            "Holdout Purchase MAE",
+            f"{mae_val:.4f} orders",
+            help=f"Out-of-sample purchase MAE (Pearson r = {r_val:.4f}).",
+        )
     else:
         col_d.metric("Mean Expected Purchases (12M)", f"{clv_df['expected_purchases_12m'].mean():.2f}")
+
+    # Scored Customer Base Note & Core Definitions
+    st.caption(
+        f"**Customer Base Scope**: **{scored_cust_count:,} scored customers** modeled by the probabilistic CLV engine. "
+        f"The remaining **{returns_only_count} customers** in `dim_customers` are returns-only accounts that made zero net purchases."
+    )
+
+    # Short Definitions Callout
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        st.info(
+            "**Revenue Definition**:\n"
+            "- Historical revenue represents gross settled purchase lines (in `fact_orders`).\n"
+            "- Deducting returns (in `fact_returns`) yields net customer spend (in `dim_customers`)."
+        )
+    with col_d2:
+        st.info(
+            "**CLV Model Specification**:\n"
+            "- Modeled and predicted strictly as **discounted gross revenue** ($d = 0.01$/month).\n"
+            "- Gross margin percentage (e.g. 40%) is applied only downstream in the Policy Simulator."
+        )
 
     st.markdown("---")
 
     # Tabs for CLV Explorer
     tab_dist, tab_seg, tab_lookup, tab_val = st.tabs([
-        "📊 P(Alive) & Lifetime Distributions",
-        "🧩 CLV by Strategic Segment",
-        "🔍 Single Customer Lookup & Uncertainty Bounds",
-        "🎯 Out-of-Sample Holdout Validation Tables",
+        "P(Alive) & Lifetime Distributions",
+        "CLV by Strategic Segment",
+        "Single Customer Lookup & Uncertainty Bounds",
+        "Out-of-Sample Holdout Validation Tables",
     ])
 
     # Subtab 1: P(Alive) & CLV Distributions
@@ -201,11 +236,11 @@ def render_clv_tab() -> None:
                 fig_val.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig_val, use_container_width=True)
         else:
-            st.info("No decision_segment_summary table found. Run decision_engine.py to populate.")
+            st.info("No decision_segment_summary table found.")
 
     # Subtab 3: Single Customer Lookup & Uncertainty Bounds
     with tab_lookup:
-        st.subheader("🔍 Single Customer Lookup & 95% Bootstrap Confidence Intervals")
+        st.subheader("Single Customer Lookup & 95% Bootstrap Confidence Intervals")
         st.caption("Inspect individual customer transaction history and probabilistic forward forecasts with empirical bootstrap bounds.")
 
         cust_list = sorted(clv_df["customer_id"].unique().tolist())
@@ -213,7 +248,7 @@ def render_clv_tab() -> None:
 
         c_row = clv_df[clv_df["customer_id"] == selected_cust].iloc[0]
 
-        st.markdown(f"### Customer ID: `{int(c_row['customer_id'])}`")
+        st.markdown(f"**Customer ID**: `{int(c_row['customer_id'])}`")
 
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric("Observed Repeat Orders", f"{int(c_row['frequency'])}")
@@ -221,7 +256,7 @@ def render_clv_tab() -> None:
         col_m3.metric("Probability Active P(Alive)", f"{c_row['p_alive']*100:.1f}%")
         col_m4.metric("Expected Avg Order Value", f"${c_row['expected_avg_order_value']:,.2f}")
 
-        st.markdown(f"#### Lifetime Value Forecast & Empirical Bootstrap 95% Confidence Intervals ({ESTIMATION_METHOD})")
+        st.markdown(f"**Lifetime Value Forecast & Empirical Bootstrap 95% Confidence Intervals ({ESTIMATION_METHOD})**")
 
         horizon_df = pd.DataFrame({
             "Forecast Horizon": ["12 Months (1 Year)", "24 Months (2 Years)"],
@@ -242,59 +277,103 @@ def render_clv_tab() -> None:
 
     # Subtab 4: Holdout Validation Tables from holdout_report.md
     with tab_val:
-        st.subheader("🎯 Out-of-Sample Holdout Model Validation Tables")
+        st.subheader("Out-of-Sample Holdout Model Validation")
         st.caption(
-            f"Authentic out-of-sample calibration from `holdout_report.md`. "
             f"Calibration: `{CALIBRATION_END_DATE}` | Holdout: `{CALIBRATION_END_DATE}` to `{HOLDOUT_END_DATE}` (373 days)."
         )
 
+        # Side-by-side comparison for F == 0 and F > 0 from holdout_report.md
+        st.markdown("#### Side-by-Side Holdout Diagnostics: BG/NBD vs. Carry-Forward Baseline")
+        st.caption("Comparison for one-time buyers (F == 0) and repeat buyers (F > 0) reading from holdout_report.md.")
+
+        side_by_side_df = pd.DataFrame([
+            {
+                "Subpopulation": "One-Time Buyers (F == 0, N=1,431)",
+                "Metric": "Purchases MAE",
+                "BG/NBD Probabilistic Model": "1.7484",
+                "Carry-Forward Baseline": "0.9196",
+                "Ranking Correlation (Spearman rho)": "0.2314 vs. 0.0000",
+                "Top Decile Capture": "17.63% vs. 10.56%",
+                "Diagnostic Finding": "BG/NBD ranks identically to tenure (-T); Carry-forward has rho=0.",
+            },
+            {
+                "Subpopulation": "One-Time Buyers (F == 0, N=1,431)",
+                "Metric": "Revenue MAE ($)",
+                "BG/NBD Probabilistic Model": "$669.60",
+                "Carry-Forward Baseline": "$318.15",
+                "Ranking Correlation (Spearman rho)": "0.2314 vs. 0.0000",
+                "Top Decile Capture": "17.63% vs. 10.56%",
+                "Diagnostic Finding": "Point forecast uncalibrated at Cutoff 1 (+125.2% over-prediction).",
+            },
+            {
+                "Subpopulation": "Repeat Buyers (F > 0, N=2,835)",
+                "Metric": "Purchases MAE",
+                "BG/NBD Probabilistic Model": "3.5173",
+                "Carry-Forward Baseline": "2.9581",
+                "Ranking Correlation (Spearman rho)": "0.5394 vs. 0.5488",
+                "Top Decile Capture": "40.58% vs. 39.31%",
+                "Diagnostic Finding": "BG/NBD captures higher top-decile revenue (+1.26%).",
+            },
+            {
+                "Subpopulation": "Repeat Buyers (F > 0, N=2,835)",
+                "Metric": "Revenue MAE ($)",
+                "BG/NBD Probabilistic Model": "$1,829.82",
+                "Carry-Forward Baseline": "$1,521.92",
+                "Ranking Correlation (Spearman rho)": "0.5394 vs. 0.5488",
+                "Top Decile Capture": "40.58% vs. 39.31%",
+                "Diagnostic Finding": "Close ranking correlation between models on repeat buyers.",
+            },
+            {
+                "Subpopulation": "All Customers (N=4,266)",
+                "Metric": "Purchases MAE / Spearman rho",
+                "BG/NBD Probabilistic Model": "2.9239 / 0.5673",
+                "Carry-Forward Baseline": "2.2743 / 0.5804",
+                "Ranking Correlation (Spearman rho)": "0.5673 vs. 0.5804",
+                "Top Decile Capture": "43.78% vs. 43.22%",
+                "Diagnostic Finding": "High overall rank correlation with strong top-decile capture.",
+            },
+        ])
+        st.dataframe(side_by_side_df, use_container_width=True)
+
+        st.markdown("---")
+
+        # Full Parsed Validation Tables from holdout_report.md
         report_path = PROJECT_ROOT / "holdout_report.md"
         tables_parsed = _extract_markdown_tables_from_report(report_path)
 
         if tables_parsed:
-            # Table 1: Summary Performance Comparison: BG/NBD vs Naive Baselines
             if len(tables_parsed) >= 1:
                 st.markdown("#### 1. Summary Performance Comparison: BG/NBD vs. Naive Baselines")
                 st.dataframe(tables_parsed[0], use_container_width=True)
 
-            # Table 2: Ranking & Performance Metrics: BG/NBD vs Carry-Forward vs Tenure
             if len(tables_parsed) >= 2:
-                st.markdown("#### 2. Ranking & Performance Metrics: BG/NBD vs. Carry-Forward Baseline vs. Tenure")
+                st.markdown("#### 2. Detailed Ranking & Performance Metrics Table")
                 st.dataframe(tables_parsed[1], use_container_width=True)
 
-            # Table 3: Customer Decile Calibration Breakdown
             if len(tables_parsed) >= 3:
                 st.markdown("#### 3. Customer Decile Calibration Breakdown (Actual vs. Predicted)")
                 st.dataframe(tables_parsed[2], use_container_width=True)
 
-            # Table 4: Rolling-Origin Multi-Cutoff Evaluation
             if len(tables_parsed) >= 4:
-                st.markdown("#### 4. Rolling-Origin Multi-Cutoff Evaluation (2010-12-01, 2011-03-01, 2011-06-01)")
+                st.markdown("#### 4. Rolling-Origin Multi-Cutoff Evaluation")
                 st.dataframe(tables_parsed[3], use_container_width=True)
 
-            # Table 5: Rolling-Origin Subpopulation Breakdown (F = 0 vs F > 0)
             if len(tables_parsed) >= 5:
-                st.markdown("#### 5. Rolling-Origin Subpopulation Breakdown (One-Time vs. Repeat Buyers)")
+                st.markdown("#### 5. Rolling-Origin Subpopulation Breakdown (F = 0 vs. F > 0)")
                 st.dataframe(tables_parsed[4], use_container_width=True)
 
-            # Table 6: Recency-Rule vs P(alive) Targeting Benchmark
             if len(tables_parsed) >= 6:
-                st.markdown("#### 6. Recency-Rule vs. P(Alive) Targeting Benchmark (Matched Selection Sizes)")
+                st.markdown("#### 6. Recency-Rule vs. P(Alive) Targeting Benchmark (Matched Sizes)")
                 st.dataframe(tables_parsed[5], use_container_width=True)
 
-            # Table 7: Comprehensive Multi-Model Architecture Comparison
             if len(tables_parsed) >= 7:
-                st.markdown("#### 7. Comprehensive Multi-Model Architecture Comparison (BG/NBD, MBG/NBD, Pareto/NBD)")
+                st.markdown("#### 7. Comprehensive Multi-Model Architecture Comparison")
                 st.dataframe(tables_parsed[6], use_container_width=True)
-        else:
-            if not decile_db_df.empty:
-                st.markdown("#### Customer Decile Calibration (from clv_holdout_deciles)")
-                st.dataframe(decile_db_df, use_container_width=True)
 
     st.markdown("---")
 
     # Page Footer naming exact source tables
     st.caption(
-        "📂 **Source Tables**: `pred_clv_summary`, `clv_scores`, `decision_segment_summary`, `clv_holdout_metrics`, `clv_holdout_deciles` | "
+        "**Source Tables**: `pred_clv_summary`, `clv_scores`, `decision_segment_summary`, `clv_holdout_metrics`, `clv_holdout_deciles` | "
         "**Report File**: `holdout_report.md`"
     )

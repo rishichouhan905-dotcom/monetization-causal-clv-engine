@@ -16,22 +16,28 @@ def test_causal_engine_full() -> None:
     assert "is_treated" in panel_df.columns
     assert "is_post_period" in panel_df.columns
 
-    did_res = estimate_twfe_did(panel_df=panel_df, outcome_col="observed_weekly_orders")
+    tr_post = (panel_df["is_treated"] == 1) & (panel_df["is_post_period"] == 1)
+    true_att_orders = float(panel_df.loc[tr_post, "realized_effect_orders"].mean())
+
+    import gc
+    sub_df = panel_df[["customer_id", "week_date", "is_treated", "is_post_period", "observed_weekly_orders", "observed_weekly_spend_winsor"]].copy()
+    del panel_df
+    gc.collect()
+
+    did_res = estimate_twfe_did(panel_df=sub_df, outcome_col="observed_weekly_orders")
     assert "estimated_att" in did_res
     assert "std_err" in did_res
     assert "ci_lower" in did_res
     assert "ci_upper" in did_res
 
-    # Assert 95% CI covers true effect on weekly_orders
-    tr_post = (panel_df["is_treated"] == 1) & (panel_df["is_post_period"] == 1)
-    true_att_orders = float(panel_df.loc[tr_post, "realized_effect_orders"].mean())
     assert did_res["ci_lower"] <= true_att_orders <= did_res["ci_upper"], (
         f"DiD 95% CI [{did_res['ci_lower']:.5f}, {did_res['ci_upper']:.5f}] does not cover true effect ({true_att_orders:.5f})"
     )
 
-    sc_res = estimate_synthetic_control(panel_df=panel_df, n_donors=50)
+    sc_res = estimate_synthetic_control(panel_df=sub_df, n_donors=50)
     assert "donor_weights_df" in sc_res
     assert "estimated_att" in sc_res
+
 
     weights = sc_res["donor_weights_df"]["weight"].values
     if len(weights) > 0:

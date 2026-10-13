@@ -19,7 +19,10 @@ from clv_causal.config import DB_PATH, PROJECT_ROOT
 def test_did_confidence_interval_covers_true_effect_weekly_orders() -> None:
     """Asserts that the customer-level TWFE DiD 95% CI covers the true population ATT on weekly_orders."""
     conn = duckdb.connect(DB_PATH)
-    panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
+    panel_df = conn.execute(
+        "SELECT customer_id, week_date, is_treated, is_post_period, observed_weekly_orders, realized_effect_orders "
+        "FROM causal_experiment_data"
+    ).df()
     conn.close()
 
     tr_post = (panel_df["is_treated"] == 1) & (panel_df["is_post_period"] == 1)
@@ -39,8 +42,12 @@ def test_did_confidence_interval_covers_true_effect_weekly_orders() -> None:
 def test_twfe_did_matches_truth_within_tolerance() -> None:
     """Tests that customer-level TWFE DiD estimate matches ground-truth ATT on winsorized spend within tolerance."""
     conn = duckdb.connect(DB_PATH)
-    panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
+    panel_df = conn.execute(
+        "SELECT customer_id, week_date, is_treated, is_post_period, observed_weekly_spend_winsor, realized_effect_spend_winsor "
+        "FROM causal_experiment_data"
+    ).df()
     conn.close()
+
 
     tr_post = (panel_df["is_treated"] == 1) & (panel_df["is_post_period"] == 1)
     true_att = float(panel_df.loc[tr_post, "realized_effect_spend_winsor"].mean())
@@ -134,7 +141,10 @@ def test_full_causal_evaluation_export() -> None:
 def test_sparse_fallback_vs_panel_ols_subsample() -> None:
     """Compares the sparse fallback with PanelOLS on a 50,000-row subsample (estimates and SE within 1e-6)."""
     conn = duckdb.connect(DB_PATH)
-    sub_df = conn.execute("SELECT * FROM causal_experiment_data LIMIT 50000").df()
+    sub_df = conn.execute(
+        "SELECT customer_id, week_date, is_treated, is_post_period, observed_weekly_spend_winsor "
+        "FROM causal_experiment_data LIMIT 50000"
+    ).df()
     conn.close()
 
     sub_df["week_date"] = pd.to_datetime(sub_df["week_date"])
@@ -150,7 +160,7 @@ def test_sparse_fallback_vs_panel_ols_subsample() -> None:
         time_effects=True,
         drop_absorbed=True,
     )
-    panel_res = mod.fit(cov_type="clustered", cluster_entity=True)
+    panel_res = mod.fit(cov_type="clustered", cluster_entity=True, low_memory=True)
     panel_att = float(panel_res.params["treat_x_post"])
     panel_se = float(panel_res.std_errors["treat_x_post"])
 
@@ -227,6 +237,49 @@ def test_policy_simulator_zero_delta_and_monotonicity() -> None:
             f"share {waiver_shares[i]}={retention_effects[i]} vs share {waiver_shares[i+1]}={retention_effects[i+1]}"
         )
     assert retention_effects[-1] == 0.0, "At 100% waiver, retention attrition shock must be 0.0"
+
+
+def test_event_study_se_equals_quadratic_form_full_covariance() -> None:
+    """Verifies event-study mean SE equals sqrt(w.T @ Sigma @ w) with nonzero off-diagonal correlation."""
+    from causal.event_study import run_event_study
+
+    conn = duckdb.connect(DB_PATH)
+    panel_df = conn.execute("SELECT customer_id, week_date, is_treated, observed_weekly_spend_winsor FROM causal_experiment_data").df()
+    conn.close()
+
+    res = run_event_study(panel_df=panel_df)
+
+
+    # 1. Check returned covariance matrix and weights
+    assert "cov_matrix_post" in res, "Expected cov_matrix_post in event study result"
+    assert "post_weights" in res, "Expected post_weights in event study result"
+    assert "mean_post_se" in res, "Expected mean_post_se in event study result"
+
+    Sigma_post = res["cov_matrix_post"]
+    w = res["post_weights"]
+    mean_post_se = res["mean_post_se"]
+
+    M = len(w)
+    assert M == 27, f"Expected 27 post-period weeks, got {M}"
+    assert Sigma_post.shape == (M, M), f"Expected shape ({M}, {M}), got {Sigma_post.shape}"
+
+    # 2. Check quadratic form identity: SE == sqrt(w.T @ Sigma_post @ w)
+    var_quad = float(w @ Sigma_post @ w)
+    se_quad = float(np.sqrt(var_quad))
+    assert np.isclose(mean_post_se, se_quad, atol=1e-7), (
+        f"Event-study SE ({mean_post_se}) must equal sqrt(w.T @ Sigma @ w) ({se_quad})"
+    )
+
+    # 3. Check nonzero off-diagonal correlation
+    D = np.diag(1.0 / np.sqrt(np.diag(Sigma_post)))
+    corr_matrix = D @ Sigma_post @ D
+    off_diag_mask = ~np.eye(M, dtype=bool)
+    off_diag_corrs = corr_matrix[off_diag_mask]
+
+    assert len(off_diag_corrs) > 0
+    assert (np.abs(off_diag_corrs) > 0.0).all(), "Expected all off-diagonal correlations to be strictly non-zero"
+    assert off_diag_corrs.mean() > 0.05, f"Expected positive off-diagonal correlation, got {off_diag_corrs.mean()}"
+
 
 
 

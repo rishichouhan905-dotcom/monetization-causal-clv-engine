@@ -46,10 +46,13 @@ def run_event_study(
     """
     if panel_df is None:
         conn = duckdb.connect(db_path)
-        panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
+        df = conn.execute(f"SELECT {time_col}, {treatment_col}, {outcome_col} FROM causal_experiment_data").df()
         conn.close()
+    else:
+        needed_cols = [time_col, treatment_col, outcome_col]
+        present = [c for c in needed_cols if c in panel_df.columns]
+        df = panel_df[present].copy()
 
-    df = panel_df.copy()
     df[time_col] = pd.to_datetime(df[time_col])
     t0_date = pd.to_datetime(intervention_date)
 
@@ -139,11 +142,22 @@ def run_event_study(
     # Mean of post-period dynamic coefficients across all 27 post-weeks
     mean_post_att = float(beta_series.loc[post_weeks].mean()) if len(post_weeks) > 0 else 0.0
 
-    # Standard error of the linear combination: bar(beta)_post = bar(Delta)_post - bar(Delta)_pre
-    # Var(bar(beta)_post) = Var(bar(Delta)_post) + Var(bar(Delta)_pre) using independent period cell variances
-    var_pre = float(v_k.loc[pre_weeks].sum() / (len(pre_weeks) ** 2)) if len(pre_weeks) > 0 else 0.0
-    var_post = float(v_k.loc[post_weeks].sum() / (len(post_weeks) ** 2)) if len(post_weeks) > 0 else 0.0
-    mean_post_se = float(np.sqrt(var_post + var_pre))
+    # Full covariance matrix of post-period dynamic coefficients (Sigma_post)
+    # Since each beta_k = Delta_k - bar(Delta)_pre, Cov(beta_i, beta_j) = var_base > 0 for i != j,
+    # and Var(beta_i) = v_k[wi] + var_base for i == j.
+    M_post = len(post_weeks)
+    Sigma_post = np.zeros((M_post, M_post))
+    for i in range(M_post):
+        for j in range(M_post):
+            wi, wj = post_weeks[i], post_weeks[j]
+            if i == j:
+                Sigma_post[i, j] = float(v_k.loc[wi] + var_base)
+            else:
+                Sigma_post[i, j] = float(var_base)
+
+    w = np.full(M_post, 1.0 / M_post) if M_post > 0 else np.array([])
+    var_post_quad = float(w @ Sigma_post @ w) if M_post > 0 else 0.0
+    mean_post_se = float(np.sqrt(var_post_quad))
 
     # Conditional conclusion text based on p-value
     if parallel_trends_pass:
@@ -255,6 +269,8 @@ def run_event_study(
         "mean_post_att": mean_post_att,
         "mean_post_se": mean_post_se,
         "conclusion_text": conclusion_text,
+        "cov_matrix_post": Sigma_post,
+        "post_weights": w,
     }
 
 

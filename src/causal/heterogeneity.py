@@ -37,7 +37,12 @@ def analyze_clv_heterogeneity(
         panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
         conn.close()
 
-    df = panel_df.copy()
+    req_cols = ["customer_id", "week_date", "is_treated", "is_post_period", "observed_weekly_spend", outcome_col]
+    if "realized_effect_spend_winsor" in panel_df.columns:
+        req_cols.append("realized_effect_spend_winsor")
+    elif "true_effect_spend" in panel_df.columns:
+        req_cols.append("true_effect_spend")
+    df = panel_df[req_cols].copy()
 
     # Define customer deciles D01 - D10 strictly from observed pre-period spend (before t_0)
     pre_spend_df = (

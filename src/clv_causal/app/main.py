@@ -20,35 +20,45 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom Styling
+# Custom Styling with Responsive Metric Cards
 st.markdown(
     """
     <style>
-    /* Metric Card Styling */
+    /* Responsive Metric Card Styling to Prevent Truncation */
     div[data-testid="stMetric"] {
         background-color: #F8FAFC;
         border: 1px solid #E2E8F0;
-        padding: 14px 18px;
-        border-radius: 10px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        padding: 12px 16px;
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        min-height: 105px;
     }
     div[data-testid="stMetric"]:hover {
         border-color: #CBD5E1;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06);
     }
     div[data-testid="stMetricLabel"] {
-        font-size: 0.88rem;
+        font-size: 0.85rem;
         font-weight: 600;
         color: #475569;
+        white-space: normal !important;
+        line-height: 1.25;
     }
     div[data-testid="stMetricValue"] {
-        font-size: 1.6rem;
+        font-size: 1.35rem !important;
         font-weight: 700;
         color: #0F172A;
+        white-space: normal !important;
+        word-break: break-word !important;
+        line-height: 1.25;
     }
-    /* Alert / Callout Box Styling */
+    div[data-testid="stMetricDelta"] {
+        font-size: 0.82rem;
+        white-space: normal !important;
+    }
+    /* Alert Box Styling */
     .stAlert {
-        border-radius: 8px;
+        border-radius: 6px;
     }
     </style>
     """,
@@ -58,14 +68,14 @@ st.markdown(
 
 def main() -> None:
     """Main application loop with sidebar navigation across the 4 platform pages."""
-    st.sidebar.title("🚀 Enterprise Decision Engine")
+    st.sidebar.title("Enterprise Decision Engine")
     st.sidebar.caption("Probabilistic CLV & Quasi-Experimental Causal Platform")
 
     pages = [
-        "📊 Overview",
-        "🔮 CLV Explorer",
-        "🧪 Causal Impact",
-        "🎛️ Policy Simulator",
+        "Overview",
+        "CLV Explorer",
+        "Causal Impact",
+        "Policy Simulator",
     ]
 
     selected_page = st.sidebar.radio(
@@ -76,7 +86,7 @@ def main() -> None:
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(
-        "### 🏛️ System Architecture\n"
+        "**System Architecture**\n"
         "- **Warehouse**: DuckDB Star Schema (`retail_warehouse.duckdb`)\n"
         "- **CLV Models**: Continuous BG/NBD & Gamma-Gamma (MLE)\n"
         "- **Econometrics**: PanelOLS DiD & Event Study\n"
@@ -85,13 +95,13 @@ def main() -> None:
     st.sidebar.caption("UCI Online Retail II Authentic Benchmark Engine")
 
     # Render selected page
-    if selected_page == "📊 Overview":
+    if selected_page == "Overview":
         render_overview_tab()
-    elif selected_page == "🔮 CLV Explorer":
+    elif selected_page == "CLV Explorer":
         render_clv_tab()
-    elif selected_page == "🧪 Causal Impact":
+    elif selected_page == "Causal Impact":
         render_causal_tab()
-    elif selected_page == "🎛️ Policy Simulator":
+    elif selected_page == "Policy Simulator":
         render_scenario_tab()
 
 

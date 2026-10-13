@@ -130,14 +130,14 @@ def build_balanced_panel(
     last_week: pd.Timestamp,
 ) -> pd.DataFrame:
     """Builds a balanced panel from each customer's first order week to last_week."""
-    records = []
-    for _, row in pre_summary[["customer_id", "first_week"]].iterrows():
-        c_id = row["customer_id"]
-        fw = row["first_week"]
+    c_ids = []
+    dates = []
+    for c_id, fw in zip(pre_summary["customer_id"].values, pre_summary["first_week"].values):
         w_range = pd.date_range(start=fw, end=last_week, freq="W-MON")
-        records.append(pd.DataFrame({"customer_id": c_id, "week_date": w_range}))
+        c_ids.extend([c_id] * len(w_range))
+        dates.extend(w_range)
 
-    panel = pd.concat(records, ignore_index=True)
+    panel = pd.DataFrame({"customer_id": np.array(c_ids, dtype=np.int64), "week_date": dates})
     panel = panel.merge(weekly_tx, on=["customer_id", "week_date"], how="left")
     panel["cf_orders"] = panel["cf_orders"].fillna(0).astype(int)
     panel["cf_spend"] = panel["cf_spend"].fillna(0.0)
