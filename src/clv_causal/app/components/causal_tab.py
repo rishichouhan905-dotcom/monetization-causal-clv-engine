@@ -14,6 +14,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
 from clv_causal.config import DB_PATH, PROJECT_ROOT
 
 
@@ -106,19 +107,23 @@ def render_causal_tab() -> None:
     q5_active_pp = q5_active_att * 100.0
     q5_active_ci_pp = (q5_active_ci[0] * 100.0, q5_active_ci[1] * 100.0)
 
-    # Summary KPI row (no decorative arrows on error/SE)
+    # Summary KPI row (Required label: 'Ground-truth ATT, winsorized weekly spend')
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Policy Rollout Date (t_0)", "2011-06-01", help="Quasi-experimental intervention policy rollout cutoff date.")
-    col2.metric(f"Ground-Truth ATT ({selected_scenario})", f"+${true_att_val:,.4f} / wk", help="True average treatment effect on the treated.")
+    col2.metric(
+        "Ground-truth ATT, winsorized weekly spend",
+        f"{fmt_usd(true_att_val, plus_sign=True)} /wk",
+        help="True average treatment effect on the treated for winsorized weekly spend.",
+    )
     col3.metric(
         "TWFE DiD Spend ATT",
-        f"+${did_att_val:,.4f} / wk",
-        help=f"Customer-level two-way fixed effects point estimate (Absolute error: ${abs(did_att_val - true_att_val):.4f}).",
+        f"{fmt_usd(did_att_val, plus_sign=True)} /wk",
+        help=f"Customer-level two-way fixed effects point estimate (Absolute error: {fmt_usd(abs(did_att_val - true_att_val))}).",
     )
     col4.metric(
         "Event Study Dynamic Mean",
-        f"+${es_mean_att:,.2f} / wk",
-        help=f"Mean post-period dynamic effect with linear combination SE = ${es_mean_se:.2f} computed from the full covariance matrix.",
+        f"{fmt_usd(es_mean_att, plus_sign=True)} /wk",
+        help=f"Mean post-period dynamic effect with linear combination SE = {fmt_usd(es_mean_se)} computed from the full covariance matrix.",
     )
 
     st.markdown("---")
@@ -134,17 +139,18 @@ def render_causal_tab() -> None:
     # Tab 1: Event Study
     with tab_es:
         st.subheader("Event Study Dynamic Treatment Effects across 27 Post-Weeks")
+        # Subtitle fixed to state the reference exactly as implemented
         st.caption(
-            "Relative week coefficients $k = t - t_0$ (spanning $k \\in [-10, +26]$) normalized against the pre-period mean reference ($k = -1$)."
+            "Relative week coefficients k = t − t_0 (spanning k in [−10, +26]) normalized against the average of all pre-period weeks (k < 0)."
         )
 
-        # Callout box on Covariance Matrix Linear Combination SE (dollars escaped)
+        # Callout box on Covariance Matrix Linear Combination SE
         st.info(
-            f"**Event-Study Dynamic Mean ATT**: **+\\${es_mean_att:,.2f} / week / customer** with "
-            f"**Linear Combination Standard Error = \\${es_mean_se:.2f}** "
-            f"computed from the **full covariance matrix** "
-            f"($\\text{{SE}} = \\sqrt{{\\mathbf{{w}}^T \\boldsymbol{{\\Sigma}}_{{post}} \\mathbf{{w}}}}$).\n\n"
-            f"**Pre-Trend Wald Test**: Joint $\\chi^2 = 6.53$ (df=9, p = {es_pval:.3f} $\\ge 0.05$). "
+            f"**Event-Study Dynamic Mean ATT**: **{fmt_usd(es_mean_att, plus_sign=True)} / week / customer** with "
+            f"**Linear Combination Standard Error = {fmt_usd(es_mean_se)}** "
+            "computed from the **full covariance matrix** "
+            "(SE = sqrt(w^T Sigma_post w)).\n\n"
+            f"**Pre-Trend Wald Test**: Joint Chi^2 = 6.53 (df=9, p = {es_pval:.3f} >= 0.05). "
             "**No evidence against parallel trends (low power; under random assignment this holds by construction)**."
         )
 
@@ -190,7 +196,7 @@ def render_causal_tab() -> None:
 
             fig_ev.update_layout(
                 title=f"Dynamic Treatment Effect Leads and Lags ({selected_scenario.capitalize()} Scenario)",
-                xaxis_title="Relative Weeks to Intervention (k = t - t_0)",
+                xaxis_title="Relative Weeks to Intervention (k = t − t_0)",
                 yaxis_title="Weekly Winsorized Spend ATT ($)",
                 template="plotly_white",
                 margin=dict(l=20, r=20, t=40, b=20),
@@ -200,13 +206,13 @@ def render_causal_tab() -> None:
     # Tab 2: ATT Estimates vs Truth Table
     with tab_bench:
         st.subheader("Quasi-Experimental ATT Estimates vs. Ground Truth Benchmark")
-        st.caption("Comparing PanelOLS TWFE, Synthetic Control, and Dynamic Event-Study against authentic realized ground truth.")
+        st.caption("Comparing PanelOLS TWFE, Synthetic Control, and Dynamic Event-Study against realized ground truth.")
 
         if not eval_df.empty:
-            # Highlight Q5 active 90d result with exact requested wording and pp formatting
+            q5_ci_str = fmt_ci(q5_active_ci_pp[0], q5_active_ci_pp[1], is_pp=True)
             st.markdown(
-                f"**Q5 Active-90 Result**: Under this draw of `{selected_scenario}`, the top-quintile active share change is "
-                f"**{q5_active_pp:+.2f} pp** (p = {q5_active_p:.4f}, 95% CI: `[{q5_active_ci_pp[0]:+.2f} pp, {q5_active_ci_pp[1]:+.2f} pp]`), "
+                f"**Q5 Active-90 Result**: Under this draw of {selected_scenario}, the top-quintile active share change is "
+                f"**{fmt_pp(q5_active_pp, plus_sign=True)}** (p = {q5_active_p:.4f}, 95% CI: {q5_ci_str}), "
                 "which is **borderline in this draw, power about 70% in Monte Carlo**."
             )
 
@@ -303,9 +309,9 @@ def render_causal_tab() -> None:
 
         st.markdown(
             "**Key Monte Carlo Findings**:\n"
-            "- **Empirical Coverage**: Ranges from **92% to 100%** across cells (consistent with nominal 95% within $\\pm 3$ percentage points Monte Carlo error with 50 replications).\n"
-            "- **Q5 Active-90 Statistical Power**: The power to detect top-quintile active share degradation at $\\alpha = 0.05$ is **about 70% in Monte Carlo**.\n"
-            "- **Zero Unbiased Estimator**: Mean bias for TWFE DiD across replications is $<\\$0.02$, confirming estimator consistency."
+            "- **Empirical Coverage**: Ranges from **92% to 100%** across cells (consistent with nominal 95% within ±3 percentage points Monte Carlo error with 50 replications).\n"
+            "- **Q5 Active-90 Statistical Power**: The power to detect top-quintile active share degradation at alpha = 0.05 is **about 70% in Monte Carlo**.\n"
+            "- **Zero Unbiased Estimator**: Mean bias for TWFE DiD across replications is < $0.02, confirming estimator consistency."
         )
 
         if not mc_df.empty:

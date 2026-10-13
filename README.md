@@ -34,7 +34,7 @@ flowchart TD
 ## 🌟 Key Technical Deliverables
 
 ### 1. Phase 1: Data Architecture & Warehouse Star Schema (dbt + DuckDB)
-- **Authentic Multi-Year Data**: Ingests complete **UCI Machine Learning Repository Online Retail II** dataset (**1,067,371 transaction records** spanning Dec 2009 – Dec 2011 across 41 countries).
+- **Multi-Year Empirical Data**: Ingests complete **UCI Machine Learning Repository Online Retail II** dataset (**1,067,371 transaction records** spanning Dec 2009 – Dec 2011 across 41 countries).
 - **High-Performance Local Warehouse**: Columnar **dbt + DuckDB** analytical database.
 - **Explicit Cancellation & Return Decision**:
   - All return/cancellation transactions are explicitly preserved in staging (`stg_transactions`) and flagged (`is_cancelled`, `is_return`).
@@ -63,7 +63,7 @@ flowchart TD
 - **In-Space Placebo Permutation Tests**: Re-fits synthetic controls for each donor country to calculate empirical permutation $p$-values.
 
 ### 4. Phase 4: Strategy & Executive BI Decision Studio (Streamlit)
-- **Executive Overview**: Real-time warehouse metrics, authentic revenue trajectory, geographic base breakdown, data quality verification badges.
+- **Executive Overview**: Real-time warehouse metrics, monthly revenue trajectory, geographic base breakdown, data quality verification badges.
 - **Probabilistic CLV Studio**: Portfolio distributions, $P(\text{Alive})$ heatmaps, holdout calibration plots, individual customer lookup with 95% credible intervals.
 - **Causal Impact Studio**: Baseline balance checks, DiD panel estimates with CRSE, event-study plot, multi-donor synthetic control trajectory, placebo permutation distributions.
 - **Strategy & Decision Studio**:

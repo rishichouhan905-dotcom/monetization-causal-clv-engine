@@ -25,3 +25,7 @@ run-pipeline = "clv_causal.run_pipeline:run_full_pipeline"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

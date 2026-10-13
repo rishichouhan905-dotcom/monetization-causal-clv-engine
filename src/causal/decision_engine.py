@@ -192,6 +192,8 @@ def simulate_q5_policy(
     ci_lower_spend = 0.0
     ci_upper_spend = 0.0
     att_active90 = 0.0
+    ci_lower_active90 = 0.0
+    ci_upper_active90 = 0.0
 
     if scen_csv.exists():
         df = pd.read_csv(scen_csv)
@@ -204,6 +206,8 @@ def simulate_q5_policy(
         active_row = df[(df["Cohort"] == "Quintile 5 (Top Spend)") & (df["Outcome_Metric"] == "active_last_90d") & (df["Estimator_Model"] == "TWFE DiD (PanelOLS)")]
         if len(active_row) > 0:
             att_active90 = float(active_row.iloc[0]["Estimated_ATT"])
+            ci_lower_active90 = float(active_row.iloc[0]["ci_lower"])
+            ci_upper_active90 = float(active_row.iloc[0]["ci_upper"])
 
     # Net margin change calculations:
     # Central = gross_margin * waived_share * N_Q5 * weeks * (-att_spend)
@@ -216,6 +220,7 @@ def simulate_q5_policy(
 
     # Q5 retention effect = (1 - waived_share) * ATT_Q5_active90
     q5_retention_effect = (1.0 - waived_share) * att_active90
+    q5_retention_effect_worst = (1.0 - waived_share) * ci_lower_active90
 
     return {
         "scenario": scenario,
@@ -229,10 +234,13 @@ def simulate_q5_policy(
         "ci_lower_spend": ci_lower_spend,
         "ci_upper_spend": ci_upper_spend,
         "att_q5_active90": att_active90,
+        "ci_lower_active90": ci_lower_active90,
+        "ci_upper_active90": ci_upper_active90,
         "net_margin_change_central": net_margin_central,
         "net_margin_change_low": net_margin_low,
         "net_margin_change_high": net_margin_high,
         "q5_retention_effect": q5_retention_effect,
+        "q5_retention_effect_worst": q5_retention_effect_worst,
     }
 
 

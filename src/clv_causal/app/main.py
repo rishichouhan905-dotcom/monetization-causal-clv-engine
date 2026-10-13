@@ -92,7 +92,7 @@ def main() -> None:
         "- **Econometrics**: PanelOLS DiD & Event Study\n"
         "- **Policy Engine**: Asymmetric Quintile Simulation\n"
     )
-    st.sidebar.caption("UCI Online Retail II Authentic Benchmark Engine")
+    st.sidebar.caption("UCI Online Retail II Benchmark Engine")
 
     # Render selected page
     if selected_page == "Overview":

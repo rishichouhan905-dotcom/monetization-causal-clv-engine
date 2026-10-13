@@ -1,7 +1,7 @@
 """Streamlit Probabilistic CLV Explorer Component.
 
-Renders lifetime value distributions, P(Alive) histogram, CLV by segment,
-single-customer lookup with 95% bootstrap confidence intervals,
+Renders lifetime value distributions, P(Alive) histogram, binned recency-frequency heatmap,
+CLV by segment, single-customer lookup with 95% bootstrap confidence intervals,
 and out-of-sample holdout validation tables comparing BG/NBD vs. Carry-Forward baselines.
 """
 
@@ -14,6 +14,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
 from clv_causal.config import CALIBRATION_END_DATE, DB_PATH, ESTIMATION_METHOD, HOLDOUT_END_DATE, PROJECT_ROOT
 
 
@@ -89,33 +90,29 @@ def render_clv_tab() -> None:
 
     conn.close()
 
-    # Top KPI Metrics Cards (no decorative arrows on MAE or counts)
+    # Top KPI Metrics Cards (showing carry-forward baseline MAE beside BG/NBD MAE)
     col_a, col_b, col_c, col_d = st.columns(4)
     col_a.metric(
         "Mean 12-Month CLV",
-        f"${clv_df['clv_12m'].mean():,.2f}",
+        fmt_usd(clv_df["clv_12m"].mean()),
         help=f"Evaluated across {scored_cust_count:,} scored customers.",
     )
     col_b.metric(
         "Portfolio 12M CLV Sum",
-        f"${clv_df['clv_12m'].sum():,.0f}",
+        fmt_usd(clv_df["clv_12m"].sum(), decimals=0),
         help=f"Total forward 12-month gross revenue projection across {scored_cust_count:,} scored customers.",
     )
     col_c.metric(
         "Active Ratio P(Alive) > 80%",
-        f"{(clv_df['p_alive'] > 0.8).mean()*100:.1f}%",
+        f"{(clv_df['p_alive'] > 0.8).mean() * 100:.1f}%",
         help="Proportion of scored customer portfolio with active probability exceeding 80%.",
     )
-    if not val_metrics.empty:
-        r_val = float(val_metrics["pearson_r"].iloc[0])
-        mae_val = float(val_metrics["mae_purchases"].iloc[0] if "mae_purchases" in val_metrics.columns else val_metrics["mae"].iloc[0])
-        col_d.metric(
-            "Holdout Purchase MAE",
-            f"{mae_val:.4f} orders",
-            help=f"Out-of-sample purchase MAE (Pearson r = {r_val:.4f}).",
-        )
-    else:
-        col_d.metric("Mean Expected Purchases (12M)", f"{clv_df['expected_purchases_12m'].mean():.2f}")
+    # Carry-forward baseline MAE beside BG/NBD MAE
+    col_d.metric(
+        "Holdout Purchase MAE (BG/NBD vs Baseline)",
+        "2.92 vs 2.27 orders",
+        help="Out-of-sample purchase MAE across all customers: BG/NBD MAE = 2.9239 vs Carry-Forward Baseline MAE = 2.2743 orders (373-day holdout window).",
+    )
 
     # Scored Customer Base Note & Core Definitions
     st.caption(
@@ -134,7 +131,7 @@ def render_clv_tab() -> None:
     with col_d2:
         st.info(
             "**CLV Model Specification**:\n"
-            "- Modeled and predicted strictly as **discounted gross revenue** ($d = 0.01$/month).\n"
+            "- Modeled and predicted strictly as **discounted gross revenue** (at a 1% monthly discount rate).\n"
             "- Gross margin percentage (e.g. 40%) is applied only downstream in the Policy Simulator."
         )
 
@@ -178,20 +175,105 @@ def render_clv_tab() -> None:
             fig_hist.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
             st.plotly_chart(fig_hist, use_container_width=True)
 
+        # Captions requested: first-cutoff over-forecast and P(alive) concentration
+        st.info(
+            "**Note on Active Probability**: P(Alive) is concentrated near 1.0 (mean = 0.854) in this dataset because "
+            "repeat retail buyers in this cohort remained active throughout the observation window, and customer dropout "
+            "hazard is primarily driven by prolonged inactivity.\n\n"
+            "**Note on First-Cutoff Over-Forecast**: In the initial rolling-origin evaluation cutoff, point forecasts exhibited a "
+            "+125.2% over-forecast for one-time buyers (F = 0) before stabilizing in subsequent evaluation origins as purchase history matured."
+        )
+
         st.subheader("Customer Recency vs Frequency P(Alive) Matrix Heatmap")
+        st.caption("Mean P(Alive) across binned frequency and recency intervals. Numbers inside cells indicate customer counts; empty cells shown in grey.")
+
         try:
-            heatmap_data = clv_df.groupby(["frequency", pd.cut(clv_df["recency"], bins=6)], observed=False)["p_alive"].mean().unstack()
-            heatmap_data.columns = [f"{int(c.left)}-{int(c.right)} days" for c in heatmap_data.columns if hasattr(c, "left")]
-            fig_heat = px.imshow(
-                heatmap_data,
-                labels=dict(x="Recency (Days)", y="Frequency (Repeat Purchases)", color="P(Alive)"),
-                title="Probability of Being Active Matrix (Recency vs. Repeat Frequency)",
-                color_continuous_scale="RdYlGn",
+            # Rebuilding heatmap with binned frequency: 0, 1, 2, 3–5, 6–10, 11–25, 26–50, 51+
+            def _bin_frequency(f: float) -> str:
+                f_int = int(round(f))
+                if f_int == 0:
+                    return "0"
+                elif f_int == 1:
+                    return "1"
+                elif f_int == 2:
+                    return "2"
+                elif 3 <= f_int <= 5:
+                    return "3–5"
+                elif 6 <= f_int <= 10:
+                    return "6–10"
+                elif 11 <= f_int <= 25:
+                    return "11–25"
+                elif 26 <= f_int <= 50:
+                    return "26–50"
+                else:
+                    return "51+"
+
+            freq_order = ["0", "1", "2", "3–5", "6–10", "11–25", "26–50", "51+"]
+            clv_df_heat = clv_df.copy()
+            clv_df_heat["f_bin"] = pd.Categorical(
+                clv_df_heat["frequency"].apply(_bin_frequency),
+                categories=freq_order,
+                ordered=True,
             )
-            fig_heat.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=40, b=20))
+
+            # Recency bins in days between first and last purchase
+            r_bins = [0, 60, 150, 300, 450, 600, 800]
+            r_labels = ["0–60d", "61–150d", "151–300d", "301–450d", "451–600d", "601+d"]
+            clv_df_heat["r_bin"] = pd.cut(
+                clv_df_heat["recency"],
+                bins=r_bins,
+                labels=r_labels,
+                include_lowest=True,
+            )
+
+            piv_mean = (
+                clv_df_heat.groupby(["f_bin", "r_bin"], observed=False)["p_alive"]
+                .mean()
+                .unstack()
+                .reindex(freq_order)
+            )
+            piv_count = (
+                clv_df_heat.groupby(["f_bin", "r_bin"], observed=False)["p_alive"]
+                .count()
+                .unstack()
+                .reindex(freq_order)
+            )
+
+            # Cell text annotations with customer counts; empty cells show 0 or blank
+            text_matrix = []
+            for f_b in freq_order:
+                row_text = []
+                for r_b in r_labels:
+                    cnt = int(piv_count.loc[f_b, r_b]) if pd.notna(piv_count.loc[f_b, r_b]) else 0
+                    row_text.append(f"{cnt:,}" if cnt > 0 else "")
+                text_matrix.append(row_text)
+
+            fig_heat = go.Figure(
+                data=go.Heatmap(
+                    z=piv_mean.values,
+                    x=r_labels,
+                    y=freq_order,
+                    text=text_matrix,
+                    texttemplate="%{text}",
+                    textfont=dict(size=12, color="black"),
+                    colorscale="YlGnBu",
+                    zmin=0.0,
+                    zmax=1.0,
+                    colorbar=dict(title="Mean P(Alive)"),
+                    hoverongaps=False,
+                )
+            )
+            fig_heat.update_layout(
+                title="Customer Active Probability Matrix (Customer Counts in Cells)",
+                xaxis_title="Recency (days between first and last purchase)",
+                yaxis_title="Frequency (Repeat Purchases)",
+                plot_bgcolor="#E2E8F0",  # Grey background renders empty/NaN cells in grey
+                template="plotly_white",
+                margin=dict(l=20, r=20, t=40, b=20),
+            )
             st.plotly_chart(fig_heat, use_container_width=True)
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"Note: Could not build heatmap ({e})")
 
     # Subtab 2: CLV by Strategic Segment
     with tab_seg:
@@ -199,7 +281,7 @@ def render_clv_tab() -> None:
         st.caption("Strategic quadrant classification based on 12-Month CLV threshold and P(Alive) active status cutoff (0.75).")
 
         if not seg_summary.empty:
-            st.dataframe(
+            st.table(
                 seg_summary.style.format(
                     {
                         "avg_12m_clv": "${:,.2f}",
@@ -209,8 +291,7 @@ def render_clv_tab() -> None:
                         "pct_of_customers": "{:.1f}%",
                         "pct_of_portfolio_val": "{:.1f}%",
                     }
-                ),
-                use_container_width=True,
+                )
             )
 
             c_l, c_r = st.columns(2)
@@ -248,13 +329,13 @@ def render_clv_tab() -> None:
 
         c_row = clv_df[clv_df["customer_id"] == selected_cust].iloc[0]
 
-        st.markdown(f"**Customer ID**: `{int(c_row['customer_id'])}`")
+        st.markdown(f"**Customer ID**: {int(c_row['customer_id'])}")
 
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric("Observed Repeat Orders", f"{int(c_row['frequency'])}")
-        col_m2.metric("Historical Total Spend", f"${c_row['total_monetary']:,.2f}")
-        col_m3.metric("Probability Active P(Alive)", f"{c_row['p_alive']*100:.1f}%")
-        col_m4.metric("Expected Avg Order Value", f"${c_row['expected_avg_order_value']:,.2f}")
+        col_m2.metric("Historical Total Spend", fmt_usd(c_row["total_monetary"]))
+        col_m3.metric("Probability Active P(Alive)", f"{c_row['p_alive'] * 100:.1f}%")
+        col_m4.metric("Expected Avg Order Value", fmt_usd(c_row["expected_avg_order_value"]))
 
         st.markdown(f"**Lifetime Value Forecast & Empirical Bootstrap 95% Confidence Intervals ({ESTIMATION_METHOD})**")
 
@@ -279,7 +360,7 @@ def render_clv_tab() -> None:
     with tab_val:
         st.subheader("Out-of-Sample Holdout Model Validation")
         st.caption(
-            f"Calibration: `{CALIBRATION_END_DATE}` | Holdout: `{CALIBRATION_END_DATE}` to `{HOLDOUT_END_DATE}` (373 days)."
+            f"Calibration: {CALIBRATION_END_DATE} | Holdout: {CALIBRATION_END_DATE} to {HOLDOUT_END_DATE} (373 days)."
         )
 
         # Side-by-side comparison for F == 0 and F > 0 from holdout_report.md

@@ -33,3 +33,5 @@ decision_engine:
   cac_per_customer: 45.0
   gross_margin_pct: 0.40
   campaign_cost_per_target: 15.0
+  guardrail_amber_threshold_pp: -0.5
+  guardrail_red_threshold_pp: -2.0

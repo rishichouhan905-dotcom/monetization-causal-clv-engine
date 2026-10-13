@@ -2,7 +2,8 @@
 
 Simulates the financial and customer retention impact of the Q5 fee-waiver intervention policy,
 reusing simulate_q5_policy from decision_engine.py with low/central/high uncertainty bands,
-active share guardrail monitors, and extrapolation warnings.
+active share guardrail monitors (both point estimate and CI worst case with config thresholds),
+and horizon validation notices.
 """
 
 from pathlib import Path
@@ -14,7 +15,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from causal.decision_engine import simulate_q5_policy
-from clv_causal.config import DB_PATH, GROSS_MARGIN_PCT, PROJECT_ROOT
+from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
+from clv_causal.config import (
+    DB_PATH,
+    GROSS_MARGIN_PCT,
+    GUARDRAIL_AMBER_THRESHOLD_PP,
+    GUARDRAIL_RED_THRESHOLD_PP,
+    PROJECT_ROOT,
+)
 
 
 def render_scenario_tab() -> None:
@@ -61,7 +69,7 @@ def render_scenario_tab() -> None:
             max_value=52,
             value=27,
             step=1,
-            help="Simulation horizon in weeks. Capped at 52 weeks. Horizons beyond 27 weeks are an extrapolation of the estimated effect.",
+            help="Simulation horizon in weeks. Horizons beyond 27 weeks are an extrapolation of the estimated effect.",
         )
 
         gross_margin_input = st.slider(
@@ -74,16 +82,15 @@ def render_scenario_tab() -> None:
         )
         gross_margin_pct = gross_margin_input / 100.0
 
-    # 3. Horizon Extrapolation Notice
-    if horizon_weeks > 27:
-        st.warning(
-            f"**Extrapolation Notice**: Horizon is set to **{horizon_weeks} weeks**. "
-            "Projections beyond 27 weeks are an **extrapolation of the estimated treatment effect**."
+    # 3. Horizon Box: renamed 'Horizon within observed 27-week window'
+    if horizon_weeks <= 27:
+        st.success(
+            f"**Horizon within observed 27-week window** (evaluation horizon: {horizon_weeks} weeks)"
         )
     else:
-        st.success(
-            f"**Empirically Validated Window**: Evaluation horizon ({horizon_weeks} weeks) is within the "
-            "empirically observed 27-week post-intervention study window."
+        st.warning(
+            f"**Extrapolation Notice**: Horizon is set to {horizon_weeks} weeks. "
+            "Projections beyond 27 weeks are an **extrapolation of the estimated treatment effect**."
         )
 
     # 4. Run Policy Simulator via decision_engine.py
@@ -97,9 +104,21 @@ def render_scenario_tab() -> None:
     net_central = sim_res["net_margin_change_central"]
     net_low = sim_res["net_margin_change_low"]
     net_high = sim_res["net_margin_change_high"]
-    active_share_effect = sim_res["q5_retention_effect"]
-    active_share_pp = active_share_effect * 100.0
     n_q5 = sim_res["n_q5"]
+
+    # Active share metrics (without waiver, with waiver, and improvement)
+    att_act = sim_res["att_q5_active90"]
+    ci_lower_act = sim_res.get("ci_lower_active90", att_act - 0.0366)
+    active_without_waiver_pp = att_act * 100.0
+    active_with_waiver_pp = (1.0 - waived_share) * att_act * 100.0
+    active_improvement_pp = active_with_waiver_pp - active_without_waiver_pp
+
+    # Active share display string requested: e.g. '−3.72 pp without waiver, −1.86 pp with waiver (improvement +1.86 pp)'
+    active_share_delta_str = (
+        f"{fmt_pp(active_without_waiver_pp)} without waiver, "
+        f"{fmt_pp(active_with_waiver_pp)} with waiver "
+        f"(improvement {fmt_pp(active_improvement_pp, plus_sign=True)})"
+    )
 
     with col_c2:
         st.markdown("### Simulated Policy Outcomes")
@@ -108,30 +127,31 @@ def render_scenario_tab() -> None:
         # Central estimate with real good/bad delta arrow
         m1.metric(
             "Net Margin Change (Central)",
-            f"${net_central:+,.2f}",
-            delta=f"${net_central:+,.2f} vs no waiver",
-            help="Central estimate evaluated at -ATT_Q5_spend. Labeled as: based on the estimated effect.",
+            fmt_usd(net_central, plus_sign=True),
+            delta=f"{fmt_usd(net_central, plus_sign=True)} vs no waiver",
+            help="Central estimate evaluated at -ATT_Q5_spend. Based on the estimated treatment effect.",
         )
-        # 95% CI Uncertainty Band without decorative arrow to avoid truncation
+        # 95% CI Uncertainty Band without decorative arrow to prevent truncation
         m2.metric(
             "95% CI Uncertainty Band",
-            f"${net_low:+,.0f} to ${net_high:+,.0f}",
-            help=f"Low evaluated at -ci_upper (${sim_res['ci_upper_spend']:+.2f}); High evaluated at -ci_lower (${sim_res['ci_lower_spend']:+.2f}).",
+            f"{fmt_usd(net_low, decimals=0)} to {fmt_usd(net_high, decimals=0)}",
+            help=f"Low evaluated at -ci_upper ({fmt_usd(sim_res['ci_upper_spend'], plus_sign=True)}); High evaluated at -ci_lower ({fmt_usd(sim_res['ci_lower_spend'], plus_sign=True)}).",
         )
-        # Active share effect in pp with real good/bad arrow
+        # Q5 Active share effect with neutral colors
         m3.metric(
             "Q5 Active Share Effect",
-            f"{active_share_pp:+.2f} pp",
-            delta=f"{active_share_pp:+.2f} pp vs no policy",
-            delta_color="normal" if active_share_pp >= 0 else "inverse",
-            help="Formula: (1 - waived_share) * ATT_Q5_active90. Represents change in 90-day active customer share in percentage points.",
+            fmt_pp(active_with_waiver_pp),
+            delta=active_share_delta_str,
+            delta_color="off",  # Neutral colours as requested
+            help="Change in 90-day active customer share with fee waiver vs without waiver.",
         )
 
+        spend_ci_str = fmt_ci(sim_res['ci_lower_spend'], sim_res['ci_upper_spend'])
         st.caption(
             "**Central estimate status**: based on the estimated effect | "
             f"Target Cohort: **{n_q5:,} treated top spenders (Quintile 5)** | "
-            f"Estimated Q5 Spend ATT: **\\${sim_res['att_q5_spend']:+.2f}/wk** "
-            f"(95% CI: `[\\${sim_res['ci_lower_spend']:+.2f}, \\${sim_res['ci_upper_spend']:+.2f}]`)"
+            f"Estimated Q5 Spend ATT: **{fmt_usd(sim_res['att_q5_spend'], plus_sign=True)} / week** "
+            f"(95% CI: {spend_ci_str})"
         )
 
     st.markdown("---")
@@ -139,46 +159,86 @@ def render_scenario_tab() -> None:
     # 5. Uncertainty Message when the band includes zero
     band_spans_zero = bool(min(net_low, net_high) <= 0.0 <= max(net_low, net_high))
     if band_spans_zero and waived_share > 0:
+        low_usd = fmt_usd(min(net_low, net_high), decimals=0)
+        high_usd = fmt_usd(max(net_low, net_high), decimals=0)
         st.warning(
             f"**Uncertainty Notice**: The 95% confidence interval for net margin change includes zero "
-            f"(\\${min(net_low, net_high):+,.0f} to \\${max(net_low, net_high):+,.0f}). "
+            f"({low_usd} to {high_usd}). "
             "Because the confidence band encompasses zero, there is statistical uncertainty whether the fee waiver policy "
             "yields a net financial gain or loss under estimation error."
         )
 
-    # 6. Guardrail Lights on the Active Share
+    # 6. Guardrail Status computed from BOTH Point Estimate and CI Worst Case with thresholds from config
     st.markdown("### Active Share Guardrail Monitor")
-    st.caption("Real-time monitoring of customer relationship stability and active share among top spenders (Quintile 5).")
+    st.caption(
+        f"Real-time monitoring of customer relationship stability and active share among top spenders (Quintile 5). "
+        f"**Thresholds from config**: Green >= {GUARDRAIL_AMBER_THRESHOLD_PP:+.1f} pp, "
+        f"Amber [{GUARDRAIL_RED_THRESHOLD_PP:+.1f} pp, {GUARDRAIL_AMBER_THRESHOLD_PP:+.1f} pp), "
+        f"Red < {GUARDRAIL_RED_THRESHOLD_PP:+.1f} pp."
+    )
+
+    # Point estimate and CI worst case calculations
+    point_act_pp = active_with_waiver_pp
+    worst_act_pp = (1.0 - waived_share) * ci_lower_act * 100.0
+
+    def _eval_guardrail(val_pp: float) -> tuple:
+        if val_pp >= GUARDRAIL_AMBER_THRESHOLD_PP:
+            return ("GREEN", "Normal / Protected", "Preserved (Minimal Risk)")
+        elif val_pp >= GUARDRAIL_RED_THRESHOLD_PP:
+            return ("AMBER", "Moderate Caution", "Moderate Erosion (Monitor Closely)")
+        else:
+            return ("RED", "Critical Degradation", "Severe Alienation (Action Required)")
+
+    status_pt_label, status_pt_risk, status_pt_desc = _eval_guardrail(point_act_pp)
+    status_w_label, status_w_risk, status_w_desc = _eval_guardrail(worst_act_pp)
 
     g_col1, g_col2, g_col3 = st.columns([2, 1, 1])
 
-    if active_share_pp >= -0.5:
-        # Green Guardrail
-        g_col1.success(
-            "**GREEN GUARDRAIL — Active Share Preserved**\n\n"
-            f"Projected active share change is **{active_share_pp:+.2f} pp** (>= -0.5 pp). "
-            "High active share retained among top spenders. Risk of customer alienation is effectively controlled."
+    with g_col1:
+        if status_pt_label == "GREEN" and status_w_label == "GREEN":
+            st.success(
+                f"**DUAL GREEN GUARDRAIL — Active Share Fully Protected**\n\n"
+                f"Both the point estimate ({fmt_pp(point_act_pp)}) and the 95% CI worst-case bound ({fmt_pp(worst_act_pp)}) "
+                f"meet the safety threshold (>= {GUARDRAIL_AMBER_THRESHOLD_PP:+.1f} pp from config)."
+            )
+        elif status_pt_label == "GREEN" and status_w_label != "GREEN":
+            st.warning(
+                f"**POINT GREEN / CI WORST-CASE {status_w_label}**\n\n"
+                f"The point estimate is protected at **{fmt_pp(point_act_pp)}** (>= {GUARDRAIL_AMBER_THRESHOLD_PP:+.1f} pp), "
+                f"but the 95% CI worst-case scenario reaches **{fmt_pp(worst_act_pp)}** ({status_w_desc}). "
+                f"Config safety threshold ({GUARDRAIL_AMBER_THRESHOLD_PP:+.1f} pp) warrants active monitoring."
+            )
+        elif status_pt_label == "AMBER":
+            st.warning(
+                f"**AMBER GUARDRAIL — Moderate Active Share Impact**\n\n"
+                f"Point estimate: **{fmt_pp(point_act_pp)}** | 95% CI worst-case: **{fmt_pp(worst_act_pp)}**. "
+                f"Falls within the Amber zone ({GUARDRAIL_RED_THRESHOLD_PP:+.1f} pp to {GUARDRAIL_AMBER_THRESHOLD_PP:+.1f} pp from config). "
+                "Consider increasing waiver share to insulate top accounts."
+            )
+        else:
+            st.error(
+                f"**RED GUARDRAIL — Severe Active Share Degradation**\n\n"
+                f"Point estimate: **{fmt_pp(point_act_pp)}** (< {GUARDRAIL_RED_THRESHOLD_PP:+.1f} pp threshold from config). "
+                f"Worst-case 95% CI reaches **{fmt_pp(worst_act_pp)}**. Immediate fee waiver expansion recommended."
+            )
+
+    with g_col2:
+        st.metric(
+            "Point Estimate Status",
+            status_pt_label,
+            delta=f"{fmt_pp(point_act_pp)} ({status_pt_risk})",
+            delta_color="off",
+            help=f"Evaluated from point ATT: {fmt_pp(point_act_pp)}. Threshold from config.",
         )
-        g_col2.metric("Q5 active share change vs no policy", f"{active_share_pp:+.2f} pp")
-        g_col3.metric("Alienation Risk Level", "Minimal (Protected)")
-    elif active_share_pp >= -2.0:
-        # Amber Guardrail
-        g_col1.warning(
-            "**AMBER GUARDRAIL — Moderate Active Share Impact**\n\n"
-            f"Projected active share change is **{active_share_pp:+.2f} pp** (between -0.5 pp and -2.0 pp). "
-            "Moderate active share erosion observed. Monitor top accounts closely and consider expanding waiver eligibility."
+
+    with g_col3:
+        st.metric(
+            "CI Worst-Case Status",
+            status_w_label,
+            delta=f"{fmt_pp(worst_act_pp)} ({status_w_risk})",
+            delta_color="off",
+            help=f"Evaluated from 95% CI lower bound: {fmt_pp(worst_act_pp)}. Threshold from config.",
         )
-        g_col2.metric("Q5 active share change vs no policy", f"{active_share_pp:+.2f} pp")
-        g_col3.metric("Alienation Risk Level", "Moderate Caution")
-    else:
-        # Red Guardrail
-        g_col1.error(
-            "**RED GUARDRAIL — High Active Share Degradation**\n\n"
-            f"Projected active share change is **{active_share_pp:+.2f} pp** (< -2.0 pp). "
-            "Severe active share erosion detected among top spenders! We recommend increasing the fee waiver share toward 100%."
-        )
-        g_col2.metric("Q5 active share change vs no policy", f"{active_share_pp:+.2f} pp")
-        g_col3.metric("Alienation Risk Level", "Critical Degradation")
 
     st.markdown("---")
 
@@ -276,9 +336,9 @@ def render_scenario_tab() -> None:
     st.markdown(
         """
         > **Econometric Formula Specification**:
-        > - **Net Margin Change** $= \\text{gross\\_margin} \\times \\text{waived\\_share} \\times N_{\\text{Q5}} \\times \\text{weeks} \\times (-\\text{ATT}_{\\text{Q5\\_spend}})$
-        >   * Evaluated for **Central** ($-\\text{ATT}$), **Low** ($-\\text{CI}_{\\text{upper}}$), and **High** ($-\\text{CI}_{\\text{lower}}$).
-        > - **Q5 Active Share Effect** $= (1 - \\text{waived\\_share}) \\times \\text{ATT}_{\\text{Q5\\_active90}}$ (measured in percentage points).
+        > - **Net Margin Change** = gross_margin × waived_share × N_Q5 × weeks × (−ATT_Q5_spend)
+        >   * Evaluated for **Central** (−ATT), **Low** (−CI_upper), and **High** (−CI_lower).
+        > - **Q5 Active Share Effect** = (1 − waived_share) × ATT_Q5_active90 (measured in percentage points).
         > - *Note: No separate CLV term is added to prevent double-counting customer churn and spend degradation.*
         """
     )
