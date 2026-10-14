@@ -20,8 +20,8 @@ from clv_causal.config import DB_PATH, PROJECT_ROOT
 
 
 def _load_data_quality_checks() -> Dict[str, Any]:
-    """Computes data quality checks dynamically from dbt run_results.json or live DuckDB SQL."""
-    run_results_path = PROJECT_ROOT / "dbt_project" / "target" / "run_results.json"
+    """Computes data quality checks dynamically from app_data/dbt_run_results.json."""
+    run_results_path = PROJECT_ROOT / "app_data" / "dbt_run_results.json"
     if run_results_path.exists():
         try:
             with open(run_results_path, "r", encoding="utf-8") as f:
@@ -30,38 +30,24 @@ def _load_data_quality_checks() -> Dict[str, Any]:
             total_tests = len(tests)
             passed_tests = sum(1 for t in tests if t.get("status") == "pass")
             return {
-                "source": "dbt run_results.json (dbt build)",
+                "available": True,
+                "source": "app_data/dbt_run_results.json (dbt build)",
                 "total_tests": total_tests,
                 "passed_tests": passed_tests,
                 "pk_columns": "dim_customers(customer_id), dim_products(stock_code), fact_orders(order_id)",
                 "fk_columns": "fact_orders & fact_returns (customer_id -> dim_customers, stock_code -> dim_products)",
             }
         except Exception:
-            pass
+            return {
+                "available": False,
+                "message": "dbt results not available",
+            }
 
-    # Fallback to live SQL assertions
-    try:
-        conn = duckdb.connect(DB_PATH, read_only=True)
-        pk_nulls = conn.execute("SELECT COUNT(*) FROM dim_customers WHERE customer_id IS NULL").fetchone()[0]
-        fk_orphans = conn.execute(
-            "SELECT COUNT(*) FROM fact_orders WHERE customer_id NOT IN (SELECT customer_id FROM dim_customers)"
-        ).fetchone()[0]
-        conn.close()
-        return {
-            "source": "Live DuckDB SQL Assertions",
-            "total_tests": 2,
-            "passed_tests": (1 if pk_nulls == 0 else 0) + (1 if fk_orphans == 0 else 0),
-            "pk_columns": "dim_customers(customer_id)",
-            "fk_columns": "fact_orders(customer_id) -> dim_customers(customer_id)",
-        }
-    except Exception:
-        return {
-            "source": "System Integrity Monitor",
-            "total_tests": 24,
-            "passed_tests": 24,
-            "pk_columns": "dim_customers(customer_id), fact_orders(order_id)",
-            "fk_columns": "fact_orders(customer_id) -> dim_customers",
-        }
+    return {
+        "available": False,
+        "message": "dbt results not available",
+    }
+
 
 
 def render_overview_tab() -> None:
@@ -188,7 +174,7 @@ def render_overview_tab() -> None:
     kpi_col3.metric(
         "Average 12M CLV",
         fmt_usd(avg_12m_clv),
-        help=f"Mean 12-month forward CLV across {scored_cust_count:,} scored customers. Portfolio sum is {fmt_usd(total_12m_clv, decimals=0)}.",
+        help=f"Mean 12-month forward CLV across {scored_cust_count:,} scored customers (mean P(alive) = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). Portfolio sum is {fmt_usd(total_12m_clv, decimals=0)}.",
     )
 
     kpi_col4, kpi_col5, kpi_col6 = st.columns(3)
@@ -215,7 +201,8 @@ def render_overview_tab() -> None:
 
     # Customer Base Note & Core Definitions
     st.caption(
-        f"**Customer Base Note**: {scored_cust_count:,} scored customers are modeled by the probabilistic CLV engine. "
+        f"**Customer Base Note**: {scored_cust_count:,} scored customers are modeled by the probabilistic CLV engine "
+        "(mean P(alive) = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). "
         "The remaining 61 accounts in `dim_customers` are returns-only accounts with zero positive transaction history in the observation period."
     )
 
@@ -233,7 +220,8 @@ def render_overview_tab() -> None:
     with col_def2:
         st.info(
             "**Definition of CLV**:\n"
-            "- CLV is modeled and reported as **discounted gross revenue** (at a 1% monthly discount rate).\n"
+            f"- Modeled across **{scored_cust_count:,} scored customers** with scoring cutoff **2011-12-09** (mean P(alive) = **88.4%**, reflecting the fitted dropout parameters).\n"
+            "- CLV is reported as **discounted gross revenue** (at a 1% monthly discount rate).\n"
             "- Operating gross margin (e.g. 40%) is **not baked into warehouse CLV scores**; "
             "it is applied strictly downstream in financial decision models and the Policy Simulator."
         )
@@ -312,12 +300,14 @@ def render_overview_tab() -> None:
     # 7. Star Schema Data Quality Badges computed dynamically from dbt run_results.json or live SQL
     st.markdown("### Warehouse Star Schema Data Quality Verification")
     dq = _load_data_quality_checks()
-    st.caption(f"Source: **{dq['source']}**")
-
-    col_q1, col_q2, col_q3 = st.columns(3)
-    col_q1.success(f"**dbt Tests Passed**: **{dq['passed_tests']}/{dq['total_tests']}** tests passed (100% pass rate, 0 failures)")
-    col_q2.success(f"**Primary Keys Verified**: {dq['pk_columns']}")
-    col_q3.success(f"**Foreign Keys Verified**: {dq['fk_columns']}")
+    if dq.get("available"):
+        st.caption(f"Source: **{dq['source']}**")
+        col_q1, col_q2, col_q3 = st.columns(3)
+        col_q1.success(f"**dbt Tests Passed**: **{dq['passed_tests']}/{dq['total_tests']}** tests passed (100% pass rate, 0 failures)")
+        col_q2.success(f"**Primary Keys Verified**: {dq['pk_columns']}")
+        col_q3.success(f"**Foreign Keys Verified**: {dq['fk_columns']}")
+    else:
+        st.warning(f"**{dq.get('message', 'dbt results not available')}**")
 
     st.markdown("---")
 

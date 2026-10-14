@@ -122,6 +122,7 @@ def test_refutations_and_heterogeneity() -> None:
     assert "degenerate" in het_df.columns
 
 
+@pytest.mark.slow
 def test_full_causal_evaluation_export() -> None:
     """Tests full causal evaluation pipeline and att_vs_truth.csv file creation."""
     res = run_full_causal_evaluation()

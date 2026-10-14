@@ -95,7 +95,7 @@ def render_clv_tab() -> None:
     col_a.metric(
         "Mean 12-Month CLV",
         fmt_usd(clv_df["clv_12m"].mean()),
-        help=f"Evaluated across {scored_cust_count:,} scored customers.",
+        help=f"Evaluated across {scored_cust_count:,} scored customers (scoring cutoff: 2011-12-09).",
     )
     col_b.metric(
         "Portfolio 12M CLV Sum",
@@ -103,9 +103,9 @@ def render_clv_tab() -> None:
         help=f"Total forward 12-month gross revenue projection across {scored_cust_count:,} scored customers.",
     )
     col_c.metric(
-        "Active Ratio P(Alive) > 80%",
-        f"{(clv_df['p_alive'] > 0.8).mean() * 100:.1f}%",
-        help="Proportion of scored customer portfolio with active probability exceeding 80%.",
+        "Average P(Alive)",
+        f"{clv_df['p_alive'].mean() * 100:.1f}%",
+        help=f"Mean P(Alive) = {clv_df['p_alive'].mean() * 100:.1f}% across {scored_cust_count:,} scored customers (scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). {(clv_df['p_alive'] > 0.8).mean() * 100:.1f}% of accounts have P(Alive) > 80%.",
     )
     # Carry-forward baseline MAE beside BG/NBD MAE
     col_d.metric(
@@ -116,7 +116,8 @@ def render_clv_tab() -> None:
 
     # Scored Customer Base Note & Core Definitions
     st.caption(
-        f"**Customer Base Scope**: **{scored_cust_count:,} scored customers** modeled by the probabilistic CLV engine. "
+        f"**Customer Base Scope**: **{scored_cust_count:,} scored customers** modeled by the probabilistic CLV engine "
+        f"(mean P(Alive) = **{clv_df['p_alive'].mean() * 100:.1f}%**, scoring cutoff: **2011-12-09**, reflecting the fitted dropout parameters). "
         f"The remaining **{returns_only_count} customers** in `dim_customers` are returns-only accounts that made zero net purchases."
     )
 
@@ -131,6 +132,7 @@ def render_clv_tab() -> None:
     with col_d2:
         st.info(
             "**CLV Model Specification**:\n"
+            f"- Modeled across **{scored_cust_count:,} scored customers** with scoring cutoff **2011-12-09** (mean P(alive) = **{clv_df['p_alive'].mean() * 100:.1f}%**, reflecting the fitted dropout parameters).\n"
             "- Modeled and predicted strictly as **discounted gross revenue** (at a 1% monthly discount rate).\n"
             "- Gross margin percentage (e.g. 40%) is applied only downstream in the Policy Simulator."
         )
@@ -177,9 +179,8 @@ def render_clv_tab() -> None:
 
         # Captions requested: first-cutoff over-forecast and P(alive) concentration
         st.info(
-            "**Note on Active Probability**: P(Alive) is concentrated near 1.0 (mean = 0.854) in this dataset because "
-            "repeat retail buyers in this cohort remained active throughout the observation window, and customer dropout "
-            "hazard is primarily driven by prolonged inactivity.\n\n"
+            f"**Note on Active Probability**: Mean P(Alive) is **{clv_df['p_alive'].mean() * 100:.1f}%** across all **{scored_cust_count:,} scored customers** "
+            "(scoring cutoff: **2011-12-09**), with values concentrated near 1.0 reflecting the fitted dropout parameters.\n\n"
             "**Note on First-Cutoff Over-Forecast**: In the initial rolling-origin evaluation cutoff, point forecasts exhibited a "
             "+125.2% over-forecast for one-time buyers (F = 0) before stabilizing in subsequent evaluation origins as purchase history matured."
         )
