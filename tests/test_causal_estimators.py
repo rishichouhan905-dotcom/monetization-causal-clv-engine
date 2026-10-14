@@ -75,13 +75,13 @@ def test_event_study_pre_period_joint_test() -> None:
     panel_df = conn.execute("SELECT * FROM causal_experiment_data").df()
     conn.close()
 
-    res = run_event_study(panel_df=panel_df, outcome_col="observed_weekly_spend_winsor")
+    res = run_event_study(panel_df=panel_df, outcome_col="observed_weekly_spend_winsor", plot_filename="event_study_plot_baseline.png")
     assert "event_study_df" in res
     assert "joint_test_stat" in res
     assert "joint_test_pval" in res
     assert len(res["event_study_df"]) > 0
 
-    plot_file = PROJECT_ROOT / "results" / "event_study_plot.png"
+    plot_file = PROJECT_ROOT / "results" / "event_study_plot_baseline.png"
     assert plot_file.exists(), f"Expected {plot_file} to exist"
 
 

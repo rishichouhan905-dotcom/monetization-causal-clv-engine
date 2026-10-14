@@ -196,14 +196,13 @@ async def main():
         msg_id = await adjust_viewport_and_capture(ws, msg_id, "page2_clv_tab3_lookup.png", full_page=True)
 
         # Tab 4: Out-of-Sample Holdout Validation Tables
-        print("  -> Tab 4: Holdout Validation Tables", flush=True)
+        print("\n  -> Tab 4: Holdout Validation Tables", flush=True)
         await click_tab("Holdout Validation")
         msg_id += 1
         await eval_js(ws, msg_id, "document.querySelector('section.main')?.scrollTo(0, 0)")
         await asyncio.sleep(1)
         msg_id = await adjust_viewport_and_capture(ws, msg_id, "page2_clv_tab4_holdout_side_by_side.png", full_page=False)
         msg_id = await adjust_viewport_and_capture(ws, msg_id, "page2_clv_tab4_holdout_tables.png", full_page=True)
-        msg_id = await adjust_viewport_and_capture(ws, msg_id, "page2_clv_explorer_holdout_tables.png", full_page=True)
 
         # -----------------------------------------------------------------
         # PAGE 3: CAUSAL IMPACT & EXPERIMENTATION STUDIO
@@ -232,7 +231,6 @@ async def main():
         print("  -> Tab 3: Q5 Divergence Gap & Deciles", flush=True)
         await click_tab("Q5 Divergence")
         msg_id = await adjust_viewport_and_capture(ws, msg_id, "page3_causal_tab3_q5_divergence.png", full_page=True)
-        msg_id = await adjust_viewport_and_capture(ws, msg_id, "page3_causal_impact_q5_gap.png", full_page=True)
 
         # Tab 4: Monte Carlo Coverage & Power (50 Runs)
         print("  -> Tab 4: Monte Carlo Coverage & Power", flush=True)
@@ -265,7 +263,6 @@ async def main():
         await eval_js(ws, msg_id, "document.querySelector('section.main')?.scrollTo(0, 1100)")
         await asyncio.sleep(1)
         msg_id = await adjust_viewport_and_capture(ws, msg_id, "page4_policy_simulator_charts.png", full_page=False)
-        msg_id = await adjust_viewport_and_capture(ws, msg_id, "page4_policy_simulator_sensitivity.png", full_page=False)
 
         print("\n[SUCCESS] Captured all screenshots across all tabs and pages into results/screenshots/!", flush=True)
 

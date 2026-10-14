@@ -317,11 +317,6 @@ def run_full_causal_evaluation(
     if churn_scenario == "baseline":
         default_csv = results_dir / "att_vs_truth.csv"
         eval_df.to_csv(default_csv, index=False)
-        scen_es_plot = results_dir / f"event_study_plot_{churn_scenario}.png"
-        default_es_plot = results_dir / "event_study_plot.png"
-        if scen_es_plot.exists():
-            import shutil
-            shutil.copyfile(scen_es_plot, default_es_plot)
         try:
             conn = duckdb.connect(db_path)
             conn.execute("CREATE OR REPLACE TABLE causal_att_vs_truth AS SELECT * FROM eval_df")

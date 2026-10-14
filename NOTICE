@@ -5,17 +5,29 @@
 This project uses the **Online Retail II** dataset provided by the **UCI Machine Learning Repository**.
 
 - **Dataset**: Online Retail II
+- **Dataset Author & Donor**: Dr. Daqing Chen (School of Engineering, London South Bank University, London, UK)
 - **Repository URI**: https://archive.ics.uci.edu/dataset/502/online+retail+ii
 - **DOI**: [10.24432/C5CG6D](https://doi.org/10.24432/C5CG6D)
-- **Creators / Donors**: 
-  - Dr. Daqing Chen (London South Bank University, London, UK)
-  - Dr. Sai Liang Sain
-  - Dr. Kun Guo
 - **License**: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode))
 
-### Academic Citation
+### Official Dataset Citation
 
-If you use this dataset or derive research from it, please cite the following original publication:
+> Chen, D. (2019). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5CG6D
+
+BibTeX:
+```bibtex
+@misc{chen2019online_retail_ii,
+  author       = {Chen, Daqing},
+  title        = {{Online Retail II}},
+  year         = {2019},
+  howpublished = {UCI Machine Learning Repository},
+  note         = {{DOI}: https://doi.org/10.24432/C5CG6D}
+}
+```
+
+### Related Reference
+
+If referencing the original RFM segmentation case study associated with this dataset:
 
 > Chen, D., Sain, S. L., & Guo, K. (2012). Data mining for the online retail industry: A case study of RFM model-based customer segmentation using data mining. *Journal of Database Marketing & Customer Strategy Management*, 19(3), 197–208. https://doi.org/10.1057/dbm.2012.17
 
@@ -31,14 +43,6 @@ BibTeX:
   year={2012},
   publisher={Palgrave Macmillan},
   doi={10.1057/dbm.2012.17}
-}
-
-@misc{online_retail_ii_502,
-  author       = {Chen, Daqing and Sain, Sai and Guo, Kun},
-  title        = {{Online Retail II}},
-  year         = {2019},
-  howpublished = {UCI Machine Learning Repository},
-  note         = {{DOI}: 10.24432/C5CG6D}
 }
 ```
 

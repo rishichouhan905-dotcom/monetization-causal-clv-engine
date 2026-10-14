@@ -23,7 +23,7 @@ def run_event_study(
     time_col: str = "week_date",
     max_leads: int = 10,
     max_lags: int = 26,
-    plot_filename: str = "event_study_plot.png",
+    plot_filename: str = "event_study_plot_baseline.png",
     db_path: str = DB_PATH,
 ) -> Dict[str, Any]:
     """Runs event study model, performs joint pre-period parallel trend test, and saves plot.
@@ -253,8 +253,6 @@ def run_event_study(
         plot_path = results_dir / plot_filename
         fig.tight_layout()
         fig.savefig(plot_path)
-        if plot_filename != "event_study_plot.png":
-            fig.savefig(results_dir / "event_study_plot.png")
         plt.close(fig)
         print(f"Saved event study plot to: {plot_path}")
     except Exception as e:

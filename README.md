@@ -174,7 +174,7 @@ Open `http://localhost:8501` in your browser.
 │       ├── app/                   # 4-page Streamlit decision platform
 │       ├── clv_engine/            # BG/NBD & Gamma-Gamma MLE probabilistic models
 │       └── warehouse/             # dbt runner and database assertion engine
-├── tests/                         # Pytest test suite (34 unit & integration tests)
+├── tests/                         # Pytest test suite (39 unit & integration tests)
 ├── CHANGELOG.md                   # Chronological reconciliation notes & release history
 ├── NOTICE                         # Dataset attribution, CC BY 4.0 license, & citation
 ├── Makefile                       # Developer automation (all, demo, sample, dbt, test, app, montecarlo)
@@ -190,11 +190,26 @@ Open `http://localhost:8501` in your browser.
 This platform is benchmarked on the real-world **Online Retail II** multi-year transaction dataset:
 
 - **Source**: [UCI Machine Learning Repository: Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+- **Dataset Author & Donor**: Dr. Daqing Chen (School of Engineering, London South Bank University)
 - **DOI**: [10.24432/C5CG6D](https://doi.org/10.24432/C5CG6D)
-- **Creators & Donors**: Dr. Daqing Chen (London South Bank University), Dr. Sai Liang Sain, and Dr. Kun Guo.
-- **License**: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode)).
+- **License**: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode))
 
-### Academic Citation
+### Official Dataset Citation
+> Chen, D. (2019). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5CG6D
+
+```bibtex
+@misc{chen2019online_retail_ii,
+  author       = {Chen, Daqing},
+  title        = {{Online Retail II}},
+  year         = {2019},
+  howpublished = {UCI Machine Learning Repository},
+  note         = {{DOI}: https://doi.org/10.24432/C5CG6D}
+}
+```
+
+### Related Reference
+> Chen, D., Sain, S. L., & Guo, K. (2012). Data mining for the online retail industry: A case study of RFM model-based customer segmentation using data mining. *Journal of Database Marketing & Customer Strategy Management*, 19(3), 197–208. https://doi.org/10.1057/dbm.2012.17
+
 ```bibtex
 @article{chen2012data,
   title={Data mining for the online retail industry: A case study of RFM model-based customer segmentation using data mining},
@@ -208,4 +223,5 @@ This platform is benchmarked on the real-world **Online Retail II** multi-year t
   doi={10.1057/dbm.2012.17}
 }
 ```
+
 See the [`NOTICE`](NOTICE) file for complete licensing and reuse terms.
