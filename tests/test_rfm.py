@@ -1,8 +1,10 @@
 """Unit tests for RFM matrix extraction."""
 
+import pytest
 from clv_causal.clv_engine.rfm_builder import extract_rfm_matrix
 
 
+@pytest.mark.fulldata
 def test_rfm_extraction() -> None:
     """Tests extraction of RFM matrix from DuckDB warehouse."""
     rfm_df = extract_rfm_matrix()

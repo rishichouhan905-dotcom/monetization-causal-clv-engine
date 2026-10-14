@@ -1,12 +1,14 @@
 """Unit tests for causal impact modeling engine."""
 
 import pandas as pd
+import pytest
 from causal.simulate_policy import simulate_policy_intervention
 from causal.twfe_did import estimate_twfe_did
 from causal.synthetic_control import estimate_synthetic_control
 from clv_causal.config import DB_PATH
 
 
+@pytest.mark.fulldata
 def test_causal_engine_full() -> None:
     """Tests causal policy simulation, TWFE DiD, and Synthetic Control estimation."""
     panel_df: pd.DataFrame = simulate_policy_intervention(db_path=DB_PATH)

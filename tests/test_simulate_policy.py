@@ -2,12 +2,15 @@
 
 import duckdb
 import numpy as np
+import pytest
 
 from causal.simulate_policy import (
     get_ground_truth_effects,
     simulate_policy_intervention,
 )
 from clv_causal.config import DB_PATH, INTERVENTION_DATE
+
+pytestmark = pytest.mark.fulldata
 
 
 def test_simulate_policy_intervention_balanced_panel_and_effects() -> None:

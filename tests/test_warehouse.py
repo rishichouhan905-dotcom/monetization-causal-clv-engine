@@ -2,7 +2,10 @@
 
 import os
 import duckdb
+import pytest
 from clv_causal.config import DB_PATH
+
+pytestmark = pytest.mark.fulldata
 
 
 def test_warehouse_tables_exist() -> None:

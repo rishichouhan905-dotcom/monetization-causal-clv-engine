@@ -2,8 +2,11 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 from clv_causal.clv_engine.clv_pipeline import ProbabilisticCLVEngine, extract_rfm_matrix
 from clv_causal.config import OBSERVATION_END_DATE
+
+pytestmark = pytest.mark.fulldata
 
 
 def test_clv_pipeline() -> None:

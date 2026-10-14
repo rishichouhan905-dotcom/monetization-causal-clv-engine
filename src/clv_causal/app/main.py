@@ -5,6 +5,12 @@ BG/NBD and Gamma-Gamma probabilistic CLV distributions, quasi-experimental
 TWFE and event-study causal inference, and executive policy simulations.
 """
 
+from pathlib import Path
+import sys
+
+# Ensure src/ is on sys.path for self-contained execution and AppTest
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 import streamlit as st
 
 from clv_causal.app.components.overview_tab import render_overview_tab

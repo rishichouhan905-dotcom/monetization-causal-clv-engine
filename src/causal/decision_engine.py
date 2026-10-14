@@ -54,7 +54,11 @@ class BusinessDecisionEngine:
         Returns:
             Dictionary containing segment_summary DataFrame and decision_scenarios DataFrame.
         """
-        conn = duckdb.connect(DB_PATH)
+        try:
+            from clv_causal.app.db import get_app_connection
+            conn = get_app_connection()
+        except Exception:
+            conn = duckdb.connect(DB_PATH)
         clv_df = conn.execute("SELECT * FROM pred_clv_summary").df()
 
         clv_70th = clv_df["clv_12m"].quantile(0.70)
@@ -131,9 +135,13 @@ class BusinessDecisionEngine:
             ]
         )
 
-        conn.execute("CREATE OR REPLACE TABLE decision_segment_summary AS SELECT * FROM segment_summary")
-        conn.execute("CREATE OR REPLACE TABLE decision_scenarios AS SELECT * FROM decision_scenarios")
-        conn.close()
+        try:
+            conn.execute("CREATE OR REPLACE TABLE decision_segment_summary AS SELECT * FROM segment_summary")
+            conn.execute("CREATE OR REPLACE TABLE decision_scenarios AS SELECT * FROM decision_scenarios")
+        except Exception:
+            pass
+        finally:
+            conn.close()
 
         return {
             "segment_summary": segment_summary,
@@ -175,13 +183,21 @@ def simulate_q5_policy(
     # Determine N_Q5
     if n_q5 is None:
         try:
-            conn = duckdb.connect(db_path, read_only=True)
+            from clv_causal.app.db import get_app_connection
+            conn = get_app_connection()
             n_q5 = conn.execute(
                 "SELECT COUNT(DISTINCT customer_id) FROM causal_experiment_data WHERE spend_quintile = 5 AND is_treated = 1"
             ).fetchone()[0]
             conn.close()
         except Exception:
-            n_q5 = 395
+            try:
+                conn = duckdb.connect(db_path, read_only=True)
+                n_q5 = conn.execute(
+                    "SELECT COUNT(DISTINCT customer_id) FROM causal_experiment_data WHERE spend_quintile = 5 AND is_treated = 1"
+                ).fetchone()[0]
+                conn.close()
+            except Exception:
+                n_q5 = 395
 
     # Load scenario benchmark results
     scen_csv = PROJECT_ROOT / "results" / f"att_vs_truth_{scenario}.csv"

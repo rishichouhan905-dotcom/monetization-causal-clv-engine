@@ -16,6 +16,7 @@ from causal.twfe_did import estimate_twfe_did, _estimate_twfe_did_sparse
 from clv_causal.config import DB_PATH, PROJECT_ROOT
 
 
+@pytest.mark.fulldata
 def test_did_confidence_interval_covers_true_effect_weekly_orders() -> None:
     """Asserts that the customer-level TWFE DiD 95% CI covers the true population ATT on weekly_orders."""
     conn = duckdb.connect(DB_PATH)
@@ -39,6 +40,7 @@ def test_did_confidence_interval_covers_true_effect_weekly_orders() -> None:
     )
 
 
+@pytest.mark.fulldata
 def test_twfe_did_matches_truth_within_tolerance() -> None:
     """Tests that customer-level TWFE DiD estimate matches ground-truth ATT on winsorized spend within tolerance."""
     conn = duckdb.connect(DB_PATH)
@@ -66,6 +68,7 @@ def test_twfe_did_matches_truth_within_tolerance() -> None:
     )
 
 
+@pytest.mark.fulldata
 def test_event_study_pre_period_joint_test() -> None:
     """Tests event study leads/lags estimation and joint pre-period parallel trend test."""
     conn = duckdb.connect(DB_PATH)
@@ -82,6 +85,7 @@ def test_event_study_pre_period_joint_test() -> None:
     assert plot_file.exists(), f"Expected {plot_file} to exist"
 
 
+@pytest.mark.fulldata
 def test_synthetic_control_donor_weights() -> None:
     """Tests Synthetic Control non-negative weights summing to 1 and RMSPE evaluation with >= 40 donors."""
     conn = duckdb.connect(DB_PATH)
@@ -100,6 +104,7 @@ def test_synthetic_control_donor_weights() -> None:
         assert abs(weights.sum() - 1.0) < 1e-3
 
 
+@pytest.mark.fulldata
 def test_refutations_and_heterogeneity() -> None:
     """Tests placebo date refutation, leave-one-donor-out, and CLV decile heterogeneity with minimum cell size."""
     conn = duckdb.connect(DB_PATH)
@@ -123,6 +128,7 @@ def test_refutations_and_heterogeneity() -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.fulldata
 def test_full_causal_evaluation_export() -> None:
     """Tests full causal evaluation pipeline and att_vs_truth.csv file creation."""
     res = run_full_causal_evaluation()
@@ -139,6 +145,7 @@ def test_full_causal_evaluation_export() -> None:
     assert "Outcome_Metric" in df.columns
 
 
+@pytest.mark.fulldata
 def test_sparse_fallback_vs_panel_ols_subsample() -> None:
     """Compares the sparse fallback with PanelOLS on a 50,000-row subsample (estimates and SE within 1e-6)."""
     conn = duckdb.connect(DB_PATH)
@@ -240,6 +247,7 @@ def test_policy_simulator_zero_delta_and_monotonicity() -> None:
     assert retention_effects[-1] == 0.0, "At 100% waiver, retention attrition shock must be 0.0"
 
 
+@pytest.mark.fulldata
 def test_event_study_se_equals_quadratic_form_full_covariance() -> None:
     """Verifies event-study mean SE equals sqrt(w.T @ Sigma @ w) with nonzero off-diagonal correlation."""
     from causal.event_study import run_event_study

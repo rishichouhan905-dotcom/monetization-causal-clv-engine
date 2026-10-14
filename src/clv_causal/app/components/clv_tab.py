@@ -104,7 +104,7 @@ def render_clv_tab() -> None:
     col_c.metric(
         "P(Alive) (Model Estimate)",
         f"{clv_df['p_alive'].mean() * 100:.1f}%",
-        help=f"Model estimate of mean P(Alive) = {clv_df['p_alive'].mean() * 100:.1f}% across {scored_cust_count:,} scored customers (scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). {(clv_df['p_alive'] > 0.8).mean() * 100:.1f}% of accounts have P(Alive) > 80%. (Note: an earlier preliminary 0.854 figure came from an intermediate rolling-origin evaluation cutoff).",
+        help=f"Model estimate of mean P(Alive) = {clv_df['p_alive'].mean() * 100:.1f}% across {scored_cust_count:,} scored customers (scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). {(clv_df['p_alive'] > 0.8).mean() * 100:.1f}% of accounts have P(Alive) > 80%.",
     )
     # Carry-forward baseline MAE beside BG/NBD MAE
     col_d.metric(
@@ -179,8 +179,7 @@ def render_clv_tab() -> None:
         # Captions requested: first-cutoff over-forecast and P(alive) concentration
         st.info(
             f"**Note on Active Probability (Model Estimate)**: The model estimate for mean P(Alive) is **{clv_df['p_alive'].mean() * 100:.1f}%** across all **{scored_cust_count:,} scored customers** "
-            "(scoring cutoff: **2011-12-09**), with values concentrated near 1.0 reflecting the fitted dropout parameters. "
-            "(Note: The earlier figure of 0.854 originated from an intermediate rolling-origin evaluation cutoff calibration before full reconciliation to the 2011-12-09 warehouse scoring cutoff).\n\n"
+            "(scoring cutoff: **2011-12-09**), with values concentrated near 1.0 reflecting the fitted dropout parameters.\n\n"
             "**Note on First-Cutoff Over-Forecast**: In the initial rolling-origin evaluation cutoff, point forecasts exhibited a "
             "+125.2% over-forecast for one-time buyers (F = 0) before stabilizing in subsequent evaluation origins as purchase history matured."
         )

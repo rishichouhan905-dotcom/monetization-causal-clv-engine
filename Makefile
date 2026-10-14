@@ -1,7 +1,7 @@
 PYTHON_VERSION := 3.13.14
 PYTHON := python
 
-.PHONY: check-env setup data dbt clv causal report app test all results demo sample
+.PHONY: check-env setup data dbt clv causal report app test all results demo sample montecarlo
 
 check-env:
 	@$(PYTHON) -c "import sys; assert sys.version_info[:2] == (3, 13), f'Expected Python 3.13.*, found {sys.version}'"
@@ -27,6 +27,9 @@ results: check-env
 report: check-env results
 	$(PYTHON) scripts/build_clv_report.py
 
+montecarlo: check-env results
+	$(PYTHON) src/causal/monte_carlo.py
+
 app: check-env
 	$(PYTHON) -m streamlit run src/clv_causal/app/main.py
 
@@ -40,5 +43,3 @@ test: check-env
 	pytest
 
 all: data dbt clv causal report test
-
-

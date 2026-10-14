@@ -171,7 +171,7 @@ def render_overview_tab() -> None:
     kpi_col3.metric(
         "Average 12M CLV",
         fmt_usd(avg_12m_clv),
-        help=f"Mean 12-month forward CLV across {scored_cust_count:,} scored customers (mean P(alive) model estimate = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters; the earlier 0.854 came from an intermediate rolling-origin cutoff). Portfolio sum is {fmt_usd(total_12m_clv, decimals=0)}.",
+        help=f"Mean 12-month forward CLV across {scored_cust_count:,} scored customers (mean P(alive) model estimate = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). Portfolio sum is {fmt_usd(total_12m_clv, decimals=0)}.",
     )
 
     kpi_col4, kpi_col5, kpi_col6 = st.columns(3)
@@ -199,7 +199,7 @@ def render_overview_tab() -> None:
     # Customer Base Note & Core Definitions
     st.caption(
         f"**Customer Base Note**: {scored_cust_count:,} scored customers are modeled by the probabilistic CLV engine "
-        "(mean P(alive) model estimate = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters; earlier 0.854 came from an intermediate rolling-origin cutoff). "
+        "(mean P(alive) model estimate = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). "
         "The remaining 61 accounts in `dim_customers` are returns-only accounts with zero positive transaction history in the observation period."
     )
 

@@ -50,7 +50,7 @@ flowchart TD
 - **RFM Extraction**: Computes Recency ($T_{\text{recency}}$), Frequency ($F$), Monetary Value ($M$), and Customer Age ($T$).
 - **BG/NBD Model**: Fits Beta-Geometric / Negative Binomial Distribution predicting purchase frequency and model estimate of active probability $P(\text{Alive})$.
 - **Gamma-Gamma Sub-Model**: Bayesian model predicting expected monetary spend per repeat purchase.
-- **Model Estimate of Active Probability**: Mean $P(\text{Alive})$ **model estimate = 88.4%** at the final scoring cutoff (**2011-12-09**) across **5,878 scored customers** (reflecting the fitted dropout parameters; an earlier 0.854 figure originated from an intermediate rolling-origin evaluation cutoff).
+- **Model Estimate of Active Probability**: Mean $P(\text{Alive})$ **model estimate = 88.4%** at the final scoring cutoff (**2011-12-09**) across **5,878 scored customers** (reflecting the fitted dropout parameters).
 - **Rolling-Origin Holdout Validation**: Evaluates out-of-sample calibration across three evaluation dates (`2010-12-01`, `2011-03-01`, `2011-06-01`).
 - **Bootstrap Uncertainty Bounds**: Generates empirical 95% bootstrap intervals for 12-month and 24-month forward projections.
 
@@ -68,7 +68,7 @@ flowchart TD
 - **CLV Explorer**: Lifetime value distributions, $P(\text{Alive})$ recency-frequency heatmap, strategic quadrant classification, single customer lookup with 95% bootstrap bounds, and holdout validation tables.
 - **Causal Impact**: Scenario toggle (`baseline` vs `hidden_degradation`), event study trajectory, ATT vs truth comparisons, decile heterogeneity breakdown, and refutations.
 - **Policy Simulator**: Interactive Quintile 5 fee-waiver calibration modeling net margin impact: $\Delta \text{Margin} = \text{gross\_margin} \times \text{waived\_share} \times N_{Q5} \times \text{weeks} \times (-\text{ATT}_{Q5,\text{spend}})$.
-- **Lightweight Fallback / Demo Mode**: Reads from `app_data/` Parquet extracts (< 6 MB total) and `results/` when the DuckDB database is absent.
+- **Lightweight Fallback / Demo Mode**: Reads from `app_data/` Parquet extracts (< 25 MB total, exactly 8.21 MB) and `results/` when the DuckDB database is absent.
 
 ---
 
@@ -104,19 +104,26 @@ SAMPLE=1 make dbt
 
 ### 4. Run Automated Test Suite
 ```bash
-# Run all tests:
-make test
+# Run fast unit & demo tests (excluding slow and fulldata tests):
+pytest -m "not slow and not fulldata" -v
 
-# Run fast tests (skipping slow causal evaluation export):
-pytest -m "not slow" -v
+# Run full test suite (requires data warehouse):
+make test
 ```
 
-### 5. Run Linter
+### 5. Run Monte Carlo Simulation (50 Replications)
+Runs 50 replications per experimental condition (baseline and hidden degradation) to benchmark estimator bias, RMSE, empirical 95% coverage, and rejection rates, reporting elapsed runtime:
+```bash
+make montecarlo
+# Results saved to results/monte_carlo.csv
+```
+
+### 6. Run Linter
 ```bash
 ruff check .
 ```
 
-### 6. Launch Executive BI Web Application
+### 7. Launch Executive BI Web Application
 ```bash
 # Standard mode (reads from retail_warehouse.duckdb):
 make app
@@ -168,8 +175,37 @@ Open `http://localhost:8501` in your browser.
 │       ├── clv_engine/            # BG/NBD & Gamma-Gamma MLE probabilistic models
 │       └── warehouse/             # dbt runner and database assertion engine
 ├── tests/                         # Pytest test suite (34 unit & integration tests)
-├── Makefile                       # Developer automation (all, demo, sample, dbt, test, app)
+├── CHANGELOG.md                   # Chronological reconciliation notes & release history
+├── NOTICE                         # Dataset attribution, CC BY 4.0 license, & citation
+├── Makefile                       # Developer automation (all, demo, sample, dbt, test, app, montecarlo)
 ├── pyproject.toml                 # Package metadata, pytest markers, & ruff linting rules
 ├── requirements.txt               # Pinned core dependencies
 └── requirements-lock.txt          # Fully frozen dependency lock
 ```
+
+---
+
+## 📜 Data Source, License & Attribution
+
+This platform is benchmarked on the real-world **Online Retail II** multi-year transaction dataset:
+
+- **Source**: [UCI Machine Learning Repository: Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+- **DOI**: [10.24432/C5CG6D](https://doi.org/10.24432/C5CG6D)
+- **Creators & Donors**: Dr. Daqing Chen (London South Bank University), Dr. Sai Liang Sain, and Dr. Kun Guo.
+- **License**: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode)).
+
+### Academic Citation
+```bibtex
+@article{chen2012data,
+  title={Data mining for the online retail industry: A case study of RFM model-based customer segmentation using data mining},
+  author={Chen, Daqing and Sain, Sai Liang and Guo, Kun},
+  journal={Journal of Database Marketing \& Customer Strategy Management},
+  volume={19},
+  number={3},
+  pages={197--208},
+  year={2012},
+  publisher={Palgrave Macmillan},
+  doi={10.1057/dbm.2012.17}
+}
+```
+See the [`NOTICE`](NOTICE) file for complete licensing and reuse terms.

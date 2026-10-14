@@ -21,19 +21,9 @@ def get_app_connection() -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(":memory:")
     app_data_dir = PROJECT_ROOT / "app_data"
 
-    tables = [
-        "dim_customers",
-        "fact_orders",
-        "fact_returns",
-        "dim_products",
-        "pred_clv_summary",
-        "decision_segment_summary",
-        "clv_holdout_metrics",
-    ]
-
-    for tbl in tables:
-        parquet_path = app_data_dir / f"{tbl}.parquet"
-        if parquet_path.exists():
+    if app_data_dir.exists():
+        for parquet_path in sorted(app_data_dir.glob("*.parquet")):
+            tbl = parquet_path.stem
             conn.execute(f"CREATE VIEW {tbl} AS SELECT * FROM '{parquet_path.as_posix()}'")
 
     return conn

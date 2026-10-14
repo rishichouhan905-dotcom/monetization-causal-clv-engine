@@ -15,6 +15,9 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+on-run-start:
+  - "{% if env_var('SAMPLE', '0') == '1' %}CREATE OR REPLACE TABLE raw_online_retail AS SELECT * FROM 'data/sample/online_retail_II_sample.parquet'{% endif %}"
+
 models:
   clv_causal_dbt:
     staging:

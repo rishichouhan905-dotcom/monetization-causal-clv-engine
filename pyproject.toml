@@ -28,8 +28,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "fulldata: marks tests that require the full warehouse, raw xlsx, or the 4,933-customer population",
 ]
 
 [tool.ruff]

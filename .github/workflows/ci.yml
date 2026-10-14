@@ -31,14 +31,13 @@ jobs:
         run: |
           ruff check .
 
-      - name: Run fast unit tests
+      - name: Run CI unit and demo tests
         run: |
-          pytest -m "not slow" -v
+          pytest -m "not slow and not fulldata" -v
 
       - name: Run dbt build on sample
         env:
           SAMPLE: "1"
           DB_PATH: "data/retail_warehouse.duckdb"
         run: |
-          python scripts/create_sample.py
-          python src/clv_causal/warehouse/build_warehouse.py
+          dbt build --project-dir dbt_project --profiles-dir dbt_project
