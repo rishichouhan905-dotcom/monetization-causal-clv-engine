@@ -2,8 +2,6 @@
 
 import duckdb
 import numpy as np
-import pytest
-import pandas as pd
 
 from causal.simulate_policy import (
     get_ground_truth_effects,

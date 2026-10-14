@@ -13,7 +13,6 @@ import sys
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import duckdb
 import numpy as np
@@ -117,6 +116,24 @@ def download_data(use_synthetic: bool = False) -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
     data_source_file = DATA_DIR / "DATA_SOURCE.txt"
+
+    # Check for SAMPLE=1 environment variable
+    if os.environ.get("SAMPLE") == "1":
+        sample_parquet = DATA_DIR / "sample" / "online_retail_II_sample.parquet"
+        print(f"SAMPLE=1 detected: Ingesting 5,000-row sample from {sample_parquet}...")
+        if not sample_parquet.exists():
+            from scripts.create_sample import create_sample
+            create_sample(sample_size=5000)
+        raw_df = pd.read_parquet(sample_parquet)
+        raw_df.to_parquet(PARQUET_PATH, index=False)
+        with open(data_source_file, "w", encoding="utf-8") as f:
+            f.write("DATA_SOURCE=STRATIFIED_SAMPLE_5000\n")
+        conn = duckdb.connect(DB_PATH)
+        conn.execute(f"CREATE OR REPLACE TABLE raw_online_retail AS SELECT * FROM '{PARQUET_PATH}'")
+        row_count = conn.execute("SELECT COUNT(*) FROM raw_online_retail").fetchone()[0]
+        conn.close()
+        print(f"Successfully loaded {row_count:,} sample rows into DuckDB 'raw_online_retail'!")
+        return
 
     if use_synthetic:
         print("Explicit --synthetic flag detected. Generating synthetic dataset...")

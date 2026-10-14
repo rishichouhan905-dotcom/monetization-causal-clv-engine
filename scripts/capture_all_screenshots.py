@@ -67,7 +67,7 @@ async def main():
 
     async with websockets.connect(ws_url, max_size=100_000_000) as ws:
         msg_id = 1
-        
+
         # 1. Setup viewport
         msg_id += 1
         await send_cmd(ws, msg_id, "Page.enable")
@@ -155,7 +155,7 @@ async def main():
         msg_id += 1
         await eval_js(ws, msg_id, "window.scrollTo(0, 0)")
         await asyncio.sleep(2)
-        
+
         # Full page
         msg_id = await adjust_viewport_and_capture(ws, msg_id, "page1_overview.png", full_page=True)
 

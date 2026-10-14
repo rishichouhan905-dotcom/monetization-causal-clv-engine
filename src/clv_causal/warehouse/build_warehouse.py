@@ -21,6 +21,19 @@ def build_star_schema() -> None:
     """Executes dbt build for dbt_project and verifies warehouse star schema tables and constraints."""
     print("Step 2: Building Star Schema & SQL Transformations via dbt (dbt-duckdb)...")
 
+    # If SAMPLE=1, ensure raw_online_retail is populated from data/sample/online_retail_II_sample.parquet
+    sample_mode = os.environ.get("SAMPLE") == "1"
+    if sample_mode:
+        sample_path = PROJECT_ROOT / "data" / "sample" / "online_retail_II_sample.parquet"
+        if not sample_path.exists():
+            from scripts.create_sample import create_sample
+            create_sample(sample_size=5000)
+        conn = duckdb.connect(DB_PATH)
+        conn.execute(f"CREATE OR REPLACE TABLE raw_online_retail AS SELECT * FROM '{sample_path.as_posix()}'")
+        row_count = conn.execute("SELECT COUNT(*) FROM raw_online_retail").fetchone()[0]
+        conn.close()
+        print(f"SAMPLE=1 active: Populated 'raw_online_retail' with {row_count:,} sample rows.")
+
     dbt_cmd: List[str] = [
         sys.executable,
         "-m",
@@ -34,6 +47,8 @@ def build_star_schema() -> None:
     print(f"Executing dbt command: {' '.join(dbt_cmd)}")
 
     env_vars = dict(os.environ, DB_PATH=DB_PATH)
+    if sample_mode:
+        env_vars["SAMPLE"] = "1"
     res = subprocess.run(dbt_cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, env=env_vars)
     print(res.stdout)
     if res.stderr:
@@ -60,7 +75,7 @@ def build_star_schema() -> None:
         LEFT JOIN dim_customers dc ON fo.customer_id = dc.customer_id 
         WHERE dc.customer_id IS NULL
     """).fetchone()[0]
-    assert orphan_cust_count == 0, f"DATA ASSERTION FAILURE: Foreign key mismatch in fact_orders!"
+    assert orphan_cust_count == 0, "DATA ASSERTION FAILURE: Foreign key mismatch in fact_orders!"
     print("[PASS] Assertion 2: Foreign Key integrity between fact_orders and dim_customers validated.")
 
     print("\nData Warehouse Star Schema successfully constructed and verified via dbt-duckdb!")

@@ -12,7 +12,6 @@ and three cohorts (Overall, Q1-Q4 pooled, Quintile 5).
 Saves results to results/monte_carlo.csv and reports exact runtime.
 """
 
-from pathlib import Path
 import time
 from typing import Any, Dict, List, Tuple
 import duckdb
@@ -315,7 +314,7 @@ def run_monte_carlo_evaluation(
     print("\n" + "=" * 88)
     print("STARTING CAUSAL MONTE CARLO ESTIMATOR VALIDATION")
     print(f"Replications per scenario: {n_replications}")
-    print(f"Scenarios evaluated:       'baseline' (cum_churn=0.20) and 'hidden_degradation' (cum_churn=0.40)")
+    print("Scenarios evaluated:       'baseline' (cum_churn=0.20) and 'hidden_degradation' (cum_churn=0.40)")
     print("=" * 88)
 
     base_panel, pre_summary, p99_val, n_post_weeks = build_base_simulation_panel()

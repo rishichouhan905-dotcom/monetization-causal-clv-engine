@@ -1,6 +1,5 @@
 """Tests for numerical and currency formatting helpers."""
 
-import pytest
 from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
 
 

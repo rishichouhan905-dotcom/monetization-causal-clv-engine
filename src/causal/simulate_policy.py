@@ -22,7 +22,7 @@ Outcomes generated (counterfactual, observed, realized true effect, and expected
 3. `active_last_90d` (indicator of any purchase in past 13 weeks / 90 days)
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import duckdb
 import numpy as np
 import pandas as pd
@@ -55,7 +55,7 @@ def extract_customer_pre_period_metrics(
     t0_str = t0_date.strftime("%Y-%m-%d")
 
     # 1. Fetch weekly aggregate transactions per customer
-    weekly_tx = conn.execute(f"""
+    weekly_tx = conn.execute("""
         SELECT
             customer_id,
             DATE_TRUNC('week', invoice_date) AS week_date,

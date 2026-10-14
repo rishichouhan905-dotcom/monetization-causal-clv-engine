@@ -50,6 +50,11 @@ data/*.duckdb
 data/raw/
 !results/
 !results/*.csv
+!app_data/
+!app_data/*.parquet
+!app_data/*.json
+!data/sample/
+!data/sample/*
 
 # User & Presentation files
 SKILLPULSE.pptx

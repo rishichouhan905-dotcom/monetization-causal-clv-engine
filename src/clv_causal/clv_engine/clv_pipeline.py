@@ -6,8 +6,6 @@ Evaluates frequency-monetary correlation, discounted 12/24 month CLV forecasts w
 and writes clv_scores to DuckDB and holdout_report.md for executive evaluation.
 """
 
-import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import duckdb
@@ -205,21 +203,6 @@ class ProbabilisticCLVEngine:
             res_df[f"clv_{m}m_upper"] = np.maximum(res_df[f"clv_{m}m"], res_df[f"clv_{m}m_upper"])
 
         return res_df
-
-    def predict_discounted_clv(
-        self,
-        bgf: BetaGeoFitter,
-        ggf: GammaGammaFitter,
-        df: pd.DataFrame,
-        time_months: int,
-        discount_rate: float = 0.01,
-    ) -> np.ndarray:
-        """Computes discounted CLV over time_months using the unified BG/NBD prediction function."""
-        monetary_col = "monetary_value_repeat" if "monetary_value_repeat" in df.columns else "monetary_value"
-        exp_monetary = ggf.conditional_expected_average_profit(df["frequency"], df[monetary_col])
-        if hasattr(exp_monetary, "values"):
-            exp_monetary = exp_monetary.values
-        pop_mean_monetary = float(exp_monetary[df["frequency"] > 0].mean()) if (df["frequency"] > 0).sum() > 0 else 50.0
 
     def predict_discounted_clv(
         self,
@@ -457,7 +440,7 @@ class ProbabilisticCLVEngine:
             fpos_tot_pred_rev = holdout_df.loc[fpos_mask, "predicted_holdout_spend"].sum()
 
             print(f"\n--- Origin Cutoff: {cal_date} -> {holdout_end_date} ({holdout_days} days | {len(holdout_df):,} customers) ---")
-            print(f"Overall Population:")
+            print("Overall Population:")
             print(f"  Actual vs Predicted Purchases: {tot_act_p:,.0f} vs {tot_pred_p:,.0f} ({(tot_pred_p - tot_act_p)/max(1, tot_act_p)*100:+.2f}%)")
             print(f"  Actual vs Predicted Revenue:   ${tot_act_rev:,.2f} vs ${tot_pred_rev:,.2f} ({(tot_pred_rev - tot_act_rev)/max(1, tot_act_rev)*100:+.2f}%)")
 

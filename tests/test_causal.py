@@ -1,11 +1,10 @@
 """Unit tests for causal impact modeling engine."""
 
-import pytest
 import pandas as pd
 from causal.simulate_policy import simulate_policy_intervention
 from causal.twfe_did import estimate_twfe_did
 from causal.synthetic_control import estimate_synthetic_control
-from clv_causal.config import DB_PATH, INTERVENTION_DATE
+from clv_causal.config import DB_PATH
 
 
 def test_causal_engine_full() -> None:

@@ -6,8 +6,6 @@ active share guardrail monitors (both point estimate and CI worst case with conf
 and horizon validation notices.
 """
 
-from pathlib import Path
-import duckdb
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -15,13 +13,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from causal.decision_engine import simulate_q5_policy
-from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
+from clv_causal.app.formatters import fmt_ci, fmt_pp, fmt_usd
 from clv_causal.config import (
-    DB_PATH,
     GROSS_MARGIN_PCT,
     GUARDRAIL_AMBER_THRESHOLD_PP,
     GUARDRAIL_RED_THRESHOLD_PP,
-    PROJECT_ROOT,
 )
 
 

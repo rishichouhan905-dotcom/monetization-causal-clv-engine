@@ -6,16 +6,13 @@ ATT estimates vs. ground truth benchmark table with 95% CIs, Q5 divergence gap a
 and Monte Carlo statistical power annotations.
 """
 
-from pathlib import Path
-import duckdb
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
-from clv_causal.config import DB_PATH, PROJECT_ROOT
+from clv_causal.app.formatters import fmt_ci, fmt_pp, fmt_usd
+from clv_causal.config import PROJECT_ROOT
 
 
 def render_causal_tab() -> None:

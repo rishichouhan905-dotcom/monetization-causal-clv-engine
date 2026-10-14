@@ -2,7 +2,6 @@
 
 import os
 import duckdb
-import pytest
 from clv_causal.config import DB_PATH
 
 

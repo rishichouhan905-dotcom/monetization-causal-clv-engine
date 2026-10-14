@@ -3,4 +3,5 @@ clv_causal:
   outputs:
     dev:
       type: duckdb
-      path: "{{ env_var('DB_PATH', '../data/retail_warehouse.duckdb') }}"
+      path: "{{ env_var('DB_PATH', 'data/retail_warehouse.duckdb') }}"
+

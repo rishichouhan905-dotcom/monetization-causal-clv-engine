@@ -6,17 +6,14 @@ and programmatically generated strategic recommendation with uncertainty bounds.
 """
 
 import json
-from pathlib import Path
 from typing import Any, Dict
-import duckdb
-import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
+from clv_causal.app.db import get_app_connection
 from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
-from clv_causal.config import DB_PATH, PROJECT_ROOT
+from clv_causal.config import PROJECT_ROOT
 
 
 def _load_data_quality_checks() -> Dict[str, Any]:
@@ -68,8 +65,8 @@ def render_overview_tab() -> None:
         "for most customers (Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5)."
     )
 
-    # 2. Read DuckDB Warehouse metrics
-    conn = duckdb.connect(DB_PATH, read_only=True)
+    # 2. Read DuckDB Warehouse metrics (falls back to app_data Parquet if DB absent)
+    conn = get_app_connection()
     total_cust: int = conn.execute("SELECT COUNT(*) FROM dim_customers").fetchone()[0]
     total_orders: int = conn.execute("SELECT COUNT(DISTINCT invoice_no) FROM fact_orders").fetchone()[0]
     gross_revenue: float = conn.execute("SELECT SUM(line_total) FROM fact_orders").fetchone()[0]
@@ -174,7 +171,7 @@ def render_overview_tab() -> None:
     kpi_col3.metric(
         "Average 12M CLV",
         fmt_usd(avg_12m_clv),
-        help=f"Mean 12-month forward CLV across {scored_cust_count:,} scored customers (mean P(alive) = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). Portfolio sum is {fmt_usd(total_12m_clv, decimals=0)}.",
+        help=f"Mean 12-month forward CLV across {scored_cust_count:,} scored customers (mean P(alive) model estimate = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters; the earlier 0.854 came from an intermediate rolling-origin cutoff). Portfolio sum is {fmt_usd(total_12m_clv, decimals=0)}.",
     )
 
     kpi_col4, kpi_col5, kpi_col6 = st.columns(3)
@@ -202,7 +199,7 @@ def render_overview_tab() -> None:
     # Customer Base Note & Core Definitions
     st.caption(
         f"**Customer Base Note**: {scored_cust_count:,} scored customers are modeled by the probabilistic CLV engine "
-        "(mean P(alive) = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). "
+        "(mean P(alive) model estimate = 88.4%, scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters; earlier 0.854 came from an intermediate rolling-origin cutoff). "
         "The remaining 61 accounts in `dim_customers` are returns-only accounts with zero positive transaction history in the observation period."
     )
 
@@ -220,7 +217,7 @@ def render_overview_tab() -> None:
     with col_def2:
         st.info(
             "**Definition of CLV**:\n"
-            f"- Modeled across **{scored_cust_count:,} scored customers** with scoring cutoff **2011-12-09** (mean P(alive) = **88.4%**, reflecting the fitted dropout parameters).\n"
+            f"- Modeled across **{scored_cust_count:,} scored customers** with scoring cutoff **2011-12-09** (mean P(alive) model estimate = **88.4%**, reflecting the fitted dropout parameters).\n"
             "- CLV is reported as **discounted gross revenue** (at a 1% monthly discount rate).\n"
             "- Operating gross margin (e.g. 40%) is **not baked into warehouse CLV scores**; "
             "it is applied strictly downstream in financial decision models and the Policy Simulator."
@@ -316,7 +313,7 @@ def render_overview_tab() -> None:
 
     with col_left:
         st.subheader("Monthly Transaction Revenue Trajectory")
-        conn = duckdb.connect(DB_PATH, read_only=True)
+        conn = get_app_connection()
         # Drop partial final month (December 2011 ends on Dec 9)
         monthly_df: pd.DataFrame = conn.execute("""
             SELECT
@@ -344,7 +341,7 @@ def render_overview_tab() -> None:
 
     with col_right:
         st.subheader("Customer Base & Revenue Geographic Concentration")
-        conn = duckdb.connect(DB_PATH, read_only=True)
+        conn = get_app_connection()
         geo_df: pd.DataFrame = conn.execute("""
             SELECT country, COUNT(customer_id) AS customer_count, ROUND(SUM(total_spend), 2) AS total_spend
             FROM dim_customers

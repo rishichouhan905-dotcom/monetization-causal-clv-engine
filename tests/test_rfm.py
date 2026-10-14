@@ -1,6 +1,5 @@
 """Unit tests for RFM matrix extraction."""
 
-import pytest
 from clv_causal.clv_engine.rfm_builder import extract_rfm_matrix
 
 

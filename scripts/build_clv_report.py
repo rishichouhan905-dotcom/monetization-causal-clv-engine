@@ -19,18 +19,16 @@ Key specifications implemented:
 """
 
 import argparse
-import os
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
-import duckdb
 import numpy as np
 import pandas as pd
 from lifetimes import BetaGeoFitter, GammaGammaFitter, ModifiedBetaGeoFitter, ParetoNBDFitter
 from scipy import stats
 
 from clv_causal.clv_engine.rfm_builder import extract_rfm_holdout_split
-from clv_causal.config import DB_PATH, PROJECT_ROOT
+from clv_causal.config import PROJECT_ROOT
 
 CUTOFFS = ["2010-12-01", "2011-03-01", "2011-06-01"]
 HOLDOUT_END_DATE = "2011-12-09"

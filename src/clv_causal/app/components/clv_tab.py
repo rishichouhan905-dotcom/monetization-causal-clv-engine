@@ -7,15 +7,14 @@ and out-of-sample holdout validation tables comparing BG/NBD vs. Carry-Forward b
 
 from pathlib import Path
 from typing import List
-import duckdb
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from clv_causal.app.formatters import fmt_ci, fmt_num, fmt_pp, fmt_usd
-from clv_causal.config import CALIBRATION_END_DATE, DB_PATH, ESTIMATION_METHOD, HOLDOUT_END_DATE, PROJECT_ROOT
+from clv_causal.app.db import get_app_connection
+from clv_causal.app.formatters import fmt_usd
+from clv_causal.config import CALIBRATION_END_DATE, ESTIMATION_METHOD, HOLDOUT_END_DATE, PROJECT_ROOT
 
 
 def _extract_markdown_tables_from_report(report_path: Path) -> List[pd.DataFrame]:
@@ -66,8 +65,8 @@ def render_clv_tab() -> None:
         f"Continuous BG/NBD repeat transaction Poisson process & Gamma-Gamma monetary distribution fitted via **{ESTIMATION_METHOD}**."
     )
 
-    # 1. Connect to DuckDB and retrieve CLV summary and segment datasets
-    conn = duckdb.connect(DB_PATH, read_only=True)
+    # 1. Connect to DuckDB and retrieve CLV summary and segment datasets (falls back to app_data Parquet if DB absent)
+    conn = get_app_connection()
     tables = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
 
     clv_df: pd.DataFrame = conn.execute("SELECT * FROM pred_clv_summary").df()
@@ -103,9 +102,9 @@ def render_clv_tab() -> None:
         help=f"Total forward 12-month gross revenue projection across {scored_cust_count:,} scored customers.",
     )
     col_c.metric(
-        "Average P(Alive)",
+        "P(Alive) (Model Estimate)",
         f"{clv_df['p_alive'].mean() * 100:.1f}%",
-        help=f"Mean P(Alive) = {clv_df['p_alive'].mean() * 100:.1f}% across {scored_cust_count:,} scored customers (scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). {(clv_df['p_alive'] > 0.8).mean() * 100:.1f}% of accounts have P(Alive) > 80%.",
+        help=f"Model estimate of mean P(Alive) = {clv_df['p_alive'].mean() * 100:.1f}% across {scored_cust_count:,} scored customers (scoring cutoff: 2011-12-09, reflecting the fitted dropout parameters). {(clv_df['p_alive'] > 0.8).mean() * 100:.1f}% of accounts have P(Alive) > 80%. (Note: an earlier preliminary 0.854 figure came from an intermediate rolling-origin evaluation cutoff).",
     )
     # Carry-forward baseline MAE beside BG/NBD MAE
     col_d.metric(
@@ -117,7 +116,7 @@ def render_clv_tab() -> None:
     # Scored Customer Base Note & Core Definitions
     st.caption(
         f"**Customer Base Scope**: **{scored_cust_count:,} scored customers** modeled by the probabilistic CLV engine "
-        f"(mean P(Alive) = **{clv_df['p_alive'].mean() * 100:.1f}%**, scoring cutoff: **2011-12-09**, reflecting the fitted dropout parameters). "
+        f"(mean P(Alive) model estimate = **{clv_df['p_alive'].mean() * 100:.1f}%**, scoring cutoff: **2011-12-09**, reflecting the fitted dropout parameters). "
         f"The remaining **{returns_only_count} customers** in `dim_customers` are returns-only accounts that made zero net purchases."
     )
 
@@ -132,7 +131,7 @@ def render_clv_tab() -> None:
     with col_d2:
         st.info(
             "**CLV Model Specification**:\n"
-            f"- Modeled across **{scored_cust_count:,} scored customers** with scoring cutoff **2011-12-09** (mean P(alive) = **{clv_df['p_alive'].mean() * 100:.1f}%**, reflecting the fitted dropout parameters).\n"
+            f"- Modeled across **{scored_cust_count:,} scored customers** with scoring cutoff **2011-12-09** (mean P(alive) model estimate = **{clv_df['p_alive'].mean() * 100:.1f}%**, reflecting the fitted dropout parameters).\n"
             "- Modeled and predicted strictly as **discounted gross revenue** (at a 1% monthly discount rate).\n"
             "- Gross margin percentage (e.g. 40%) is applied only downstream in the Policy Simulator."
         )
@@ -179,8 +178,9 @@ def render_clv_tab() -> None:
 
         # Captions requested: first-cutoff over-forecast and P(alive) concentration
         st.info(
-            f"**Note on Active Probability**: Mean P(Alive) is **{clv_df['p_alive'].mean() * 100:.1f}%** across all **{scored_cust_count:,} scored customers** "
-            "(scoring cutoff: **2011-12-09**), with values concentrated near 1.0 reflecting the fitted dropout parameters.\n\n"
+            f"**Note on Active Probability (Model Estimate)**: The model estimate for mean P(Alive) is **{clv_df['p_alive'].mean() * 100:.1f}%** across all **{scored_cust_count:,} scored customers** "
+            "(scoring cutoff: **2011-12-09**), with values concentrated near 1.0 reflecting the fitted dropout parameters. "
+            "(Note: The earlier figure of 0.854 originated from an intermediate rolling-origin evaluation cutoff calibration before full reconciliation to the 2011-12-09 warehouse scoring cutoff).\n\n"
             "**Note on First-Cutoff Over-Forecast**: In the initial rolling-origin evaluation cutoff, point forecasts exhibited a "
             "+125.2% over-forecast for one-time buyers (F = 0) before stabilizing in subsequent evaluation origins as purchase history matured."
         )

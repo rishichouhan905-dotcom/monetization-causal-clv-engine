@@ -6,7 +6,7 @@ Requires minimum cell size (>= 10 treated customers per decile) and flags
 degenerate cells with degenerate = True and NaN instead of returning 0.0.
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 import duckdb
 import numpy as np
 import pandas as pd

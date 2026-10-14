@@ -162,8 +162,6 @@ def _estimate_twfe_did_sparse(
     time_col: str = "week_date",
 ) -> Dict[str, Any]:
     """Memory-efficient Frisch-Waugh-Lovell projection for TWFE DiD using scipy.sparse LSQR."""
-    import scipy.sparse as sp
-    import scipy.sparse.linalg as spla
     from scipy import stats
 
     d = (df[treatment_col] * df[post_col]).astype(float).values

@@ -5,8 +5,7 @@ a joint Wald test for pre-period parallel trends (H_0: beta_k = 0 for k < -1),
 and generates high-resolution publication-quality event study plots.
 """
 
-from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 import duckdb
 import numpy as np
 import pandas as pd

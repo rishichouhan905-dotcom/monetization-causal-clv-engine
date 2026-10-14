@@ -5,7 +5,7 @@ optimization (w_j >= 0, sum(w_j) = 1), calculates pre-period RMSPE, and computes
 placebo-in-space permutation p-values with >= 40 donor cohorts.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 import duckdb
 import numpy as np
 import pandas as pd

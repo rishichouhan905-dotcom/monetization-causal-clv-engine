@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 from clv_causal.clv_engine.clv_pipeline import ProbabilisticCLVEngine, extract_rfm_matrix
 from clv_causal.config import OBSERVATION_END_DATE
 
@@ -174,7 +173,7 @@ def test_calibration_sample_size_and_uniqueness() -> None:
     prev_n = 0
     for c in cutoffs:
         df = extract_rfm_holdout_split(calibration_end_date=c, holdout_end_date="2011-12-09")
-        
+
         # 1. customer_id is strictly unique
         assert df["customer_id"].is_unique, f"Duplicate customer_id found in calibration frame for cutoff {c}!"
 

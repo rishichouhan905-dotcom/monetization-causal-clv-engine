@@ -1,7 +1,7 @@
 PYTHON_VERSION := 3.13.14
 PYTHON := python
 
-.PHONY: check-env setup data dbt clv causal report app test all results
+.PHONY: check-env setup data dbt clv causal report app test all results demo sample
 
 check-env:
 	@$(PYTHON) -c "import sys; assert sys.version_info[:2] == (3, 13), f'Expected Python 3.13.*, found {sys.version}'"
@@ -30,8 +30,15 @@ report: check-env results
 app: check-env
 	$(PYTHON) -m streamlit run src/clv_causal/app/main.py
 
+demo: check-env
+	$(PYTHON) -m streamlit run src/clv_causal/app/main.py
+
+sample: check-env
+	$(PYTHON) scripts/create_sample.py
+
 test: check-env
 	pytest
 
 all: data dbt clv causal report test
+
 
