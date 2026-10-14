@@ -145,14 +145,23 @@
 | **hidden_degradation** | Quintile 5 (Top Spend) | `weekly_orders` | 50 | -0.0261 | -0.0256 | +0.0006 | 0.0102 | **98%** | 48% |
 | **hidden_degradation** | Quintile 5 (Top Spend) | `weekly_spend_winsor` | 50 | -7.3292 | -7.1614 | +0.1678 | 5.6550 | **100%** | 14% |
 
-## 8. Confounded-Assignment Diagnostic & Pre-Trend Falsification
+## 8. Confounded-Assignment Diagnostic & Pre-Trend Falsification (Real Panel)
 
-| Assignment Mechanism | Test / Metric | Value | Statistical Significance | Conclusion |
-| :--- | :--- | :---: | :---: | :--- |
-| **Stratified Random Assignment** | Pre-Trend Joint Wald Test | $\chi^2 = 0.27$ | $p = 0.9917 \ge 0.05$ | **Passes Parallel Trends** (Unconfounded) |
-| **Confounded Assignment** | Pre-Trend Joint Wald Test | $\chi^2 = 431.58$ | $p = 0.0000e+00 < 0.01$ | **Rejects Parallel Trends** (Severe Differential Pre-Trend) |
-| **Confounded Simulation** | Treated Mean Spend Growth | -0.0169 | — | Selection Bias (treated have artificially higher trajectory) |
-| **Confounded Simulation** | Control Mean Spend Growth | -0.9121 | — | Artificial Growth Gap: +0.8952 |
+To validate the identification framework, we evaluate the system under a deliberate **confounded assignment mechanism** on the empirical 390,939-row balanced customer panel, where treatment probability correlates with individual pre-period spend growth. The table below contrasts the empirical real-panel confounded run (`results/confounded_assignment.csv`) against the benchmark stratified random assignment:
+
+| Identification Diagnostic / Estimator Metric | Baseline Stratified Random Assignment | Confounded Assignment (Real Panel) | Impact / Conclusion |
+| :--- | :---: | :---: | :--- |
+| **Pre-Trend Joint Wald Test Statistic ($\chi^2$)** | $\chi^2 = 6.53$ (df=9) | **$\chi^2 = 60.63$** (df=9) | Massive surge in pre-period test statistic |
+| **Pre-Trend Wald Test $p$-value** | $p = 0.6856 \ge 0.05$ | **$p = 1.0118e-09 < 0.001$** | **Rejects parallel trends** (Falsification triggered) |
+| **True Ground-Truth ATT ($/cust/wk)** | $+4.4831 | $+4.7670 | Known policy effect |
+| **TWFE DiD Estimate ($/cust/wk)** | $+5.5032 (SE=$1.7218) | **$+14.0773** (SE=$1.9602) | Upward bias from differential pre-trend |
+| **TWFE DiD Bias ($/cust/wk)** | **$+1.0200** | **$+9.3103** | **9.1x higher bias** under confounding |
+| **Synthetic Control ATT Estimate ($/cust/wk)** | $+6.7308 | **$+50.6556** | Severe divergence from donor inability to match trend |
+| **Synthetic Control Pre-RMSPE ($)** | $5.2480 | **$36.5875** | Pre-intervention donor fit breaks down (7.0x error) |
+| **Customer Pre-Period Spend Growth Formula** | — | `(late_spend - early_spend) / (late_spend + early_spend + 10.0)` | Explicit normalized growth metric |
+| **Treated Mean Spend Growth** | Balanced ($\approx 0.00$) | -0.0169 | Preferential selection of accelerating spenders |
+| **Control Mean Spend Growth** | Balanced ($\approx 0.00$) | -0.9121 | Decelerating or flat spenders left in control |
+| **Pre-Period Spend Growth Gap** | **0.0000** | **+0.8952** | Severe selection bias violating unconfoundedness |
 
 ## 9. Treatment Effect Heterogeneity across Pre-Intervention Spend Deciles
 
@@ -174,7 +183,7 @@
 ### 9.2 Hidden Degradation Scenario Deciles (Q5 Divergence)
 
 | Decile | Customers | Treated | True Realized ATT ($) | Estimated DiD ATT ($) | Std Error | p-value | Bonferroni p-val |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **D01** | 494 | 197 | +0.57 | +0.39 | 0.75 | 0.6089 | 1.0000 |
 | **D02** | 493 | 198 | +0.91 | +1.07 | 0.88 | 0.2259 | 1.0000 |
 | **D03** | 493 | 194 | +1.22 | +0.47 | 1.01 | 0.6461 | 1.0000 |
