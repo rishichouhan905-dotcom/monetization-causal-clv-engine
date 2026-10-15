@@ -9,6 +9,22 @@ Production-style end-to-end data engineering, probabilistic machine learning, qu
 
 ---
 
+## 📊 Platform Headline Summary & Empirical Benchmarks
+
+| Capability / Benchmark | Empirical Result | Methodology / Pipeline Component | Verification Status |
+| :--- | :--- | :--- | :--- |
+| **Data Warehouse** | 824,293 transactions ($16.65M net spend) | dbt + DuckDB analytical star schema (`fact_orders`, `fact_returns`) | $0.00 exact customer reconciliation; 24 dbt schema tests passed |
+| **CLV Scoring Population** | 5,878 scored customers (mean $P(\text{Alive}) = 88.43\%$) | BG/NBD + Gamma-Gamma MLE with parametric bootstrap bounds | Fully validated on holdout; parameters reflect fitted dropout process |
+| **Out-of-Sample Calibration** | Volume: -5.44%, Revenue: -5.65% error (MAE: $1.21 / $598) | 3-Cutoff Rolling Origin (`2010-12-01`, `2011-03-01`, `2011-06-01`) | Outperforms naive baselines; decile calibration monotonic |
+| **Balanced Causal Panel** | 390,939 customer-weeks (4,933 cust $\times$ 79 wks) | Customer-week panel tracking 52 pre-weeks and 27 post-weeks ($t_0 = \text{2011-06-01}$) | Pre-trend joint Wald test passed ($\chi^2 = 4.1326, p = 0.9025$) |
+| **Quasi-Experimental ATT** | $+\$5.50 \pm \$1.72/\text{week}$ (95% CI $[+\$2.13, +\$8.88]$) | Two-Way Fixed Effects (TWFE) DiD via `PanelOLS` (clustered SEs) | Recovers ground truth $+\$4.48/\text{week}$ (single-draw error $+\$1.02$) |
+| **Synthetic Control Benchmark** | $+\$5.11/\text{week}$ (Pre-period RMSPE: $\$5.25$) | 50-donor constrained quadratic optimization with leave-one-out | Replicates TWFE effect nonparametrically with high donor fit |
+| **Monte Carlo Coverage** | 96.0% empirical 95% CI coverage across 50 replications | 50 full synthetic panel iterations per experimental condition | Mean bias $-\$0.04/\text{week}$, RMSE $\$1.84/\text{week}$ |
+| **Selection Stress Falsification** | Parallel trends rejected ($\chi^2 = 60.6339, p = 1.01 \times 10^{-9}$) | Extreme near-deterministic spend-velocity selection stress test | Detects broken parallel trends; Synthetic Control RMSPE explodes $7.0\times$ |
+| **Executive Decision App** | 4 interactive pages + automated demo mode (< 25 MB Parquet) | Streamlit BI application with full fallback mode when DB absent | Verified headless rendering test across all 4 pages & tabs |
+
+---
+
 ## 🏗️ System Architecture & Workflow
 
 ```mermaid
@@ -69,6 +85,32 @@ flowchart TD
 - **Causal Impact**: Scenario toggle (`baseline` vs `hidden_degradation`), event study trajectory, ATT vs truth comparisons, decile heterogeneity breakdown, and refutations.
 - **Policy Simulator**: Interactive Quintile 5 fee-waiver calibration modeling net margin impact: $\Delta \text{Margin} = \text{gross\_margin} \times \text{waived\_share} \times N_{Q5} \times \text{weeks} \times (-\text{ATT}_{Q5,\text{spend}})$.
 - **Lightweight Fallback / Demo Mode**: Reads from `app_data/` Parquet extracts (< 25 MB total, exactly 8.21 MB) and `results/` when the DuckDB database is absent.
+
+---
+
+## 🖥️ Executive BI Decision Application (Visual Walkthrough)
+
+The companion Streamlit application provides four interactive executive interfaces:
+
+| Executive Overview (Page 1) | CLV Explorer & Holdout Calibration (Page 2) |
+| :---: | :---: |
+| [![Executive Overview](results/screenshots/page1_overview.png)](results/screenshots/page1_overview.png) | [![CLV Explorer](results/screenshots/page2_clv_explorer.png)](results/screenshots/page2_clv_explorer.png) |
+| *High-level warehouse KPIs, monthly gross revenue trajectory, star schema data quality verification, and dynamic executive recommendation.* | *Probabilistic BG/NBD lifetime distributions, P(Alive) heatmap, single-customer lookup with 95% bootstrap intervals, and multi-cutoff holdout tables.* |
+
+| Causal Impact & Quasi-Experimentation (Page 3) | Policy Simulator & Scenario Calibration (Page 4) |
+| :---: | :---: |
+| [![Causal Impact](results/screenshots/page3_causal_impact.png)](results/screenshots/page3_causal_impact.png) | [![Policy Simulator](results/screenshots/page4_policy_simulator.png)](results/screenshots/page4_policy_simulator.png) |
+| *Event-study trajectory, ATT vs truth benchmark, pre-intervention spend decile heterogeneity, and synthetic control refutations.* | *Interactive Quintile 5 VIP fee-waiver calibration modeling net margin impact, baseline vs hidden degradation churn risk, and breakeven boundaries.* |
+
+---
+
+## 📚 Technical Documentation & Single Source of Truth
+
+Comprehensive analytical guides, single-source-of-truth references, and decision memoranda are maintained under `docs/`:
+- **[Empirical Results & Provenance Facts Reference](docs/RESULTS_FACTS.md)**: Programmatically generated facts sheet verifying all cutoffs, revenue reconciliations, TWFE estimates, and Monte Carlo metrics.
+- **[Econometric & Probabilistic Methodology Manual](docs/methodology.md)**: Full mathematical specifications of BG/NBD, Gamma-Gamma MLE, TWFE DiD, Event-Study variance $w^T \Sigma w$, and selection stress testing.
+- **[Executive Policy Decision Memo](docs/decision_memo.md)**: Formal business memorandum evaluating the monetization fee-waiver rollout on Quintile 5 accounts, financial margin sensitivity, and risk guardrails.
+- **[Out-of-Sample Holdout Validation Report](holdout_report.md)**: Detailed multi-cutoff holdout performance comparisons against naive baselines and recency targeting rules.
 
 ---
 
@@ -154,9 +196,15 @@ Open `http://localhost:8501` in your browser.
 │   ├── tests/                     # Singular SQL tests (revenue reconciliation)
 │   ├── dbt_project.yml            # dbt project configuration
 │   └── profiles.yml               # dbt DuckDB connection profile
+├── docs/                          # In-depth technical guides & empirical truth references
+│   ├── RESULTS_FACTS.md           # Programmatically generated facts sheet & provenance validation
+│   ├── methodology.md             # Econometric, probabilistic, & data engineering manual
+│   └── decision_memo.md           # Strategic monetization & VIP fee-waiver decision memo
 ├── results/                       # Exported benchmark CSVs, event study plots, & Monte Carlo evaluations
 │   ├── att_vs_truth_baseline.csv
 │   ├── att_vs_truth_hidden_degradation.csv
+│   ├── baseline_assignment.csv    # Covariance-based Wald benchmark (empirical panel)
+│   ├── confounded_assignment.csv  # Near-deterministic velocity stress test benchmark
 │   ├── event_study_baseline.csv
 │   ├── event_study_hidden_degradation.csv
 │   ├── heterogeneity_baseline.csv
