@@ -196,30 +196,31 @@ def simulate_policy_intervention(
 
     rng = np.random.default_rng(random_seed)
 
+    # Pre-period spend growth calculation for auditing, diagnostics, and confounded assignment
+    tx = conn.execute(f"""
+        SELECT customer_id, invoice_date, SUM(line_total) as order_val
+        FROM fact_orders WHERE invoice_date < '{t0_str}'
+        GROUP BY customer_id, invoice_no, invoice_date
+    """).df()
+    tx["invoice_date"] = pd.to_datetime(tx["invoice_date"])
+    first_dates = tx.groupby("customer_id")["invoice_date"].min().reset_index().rename(columns={"invoice_date": "first_date"})
+    tx = tx.merge(first_dates, on="customer_id")
+    tx["mid_date"] = tx["first_date"] + (t0_date - tx["first_date"]) / 2.0
+    early_spend = tx[tx["invoice_date"] < tx["mid_date"]].groupby("customer_id")["order_val"].sum()
+    late_spend = tx[tx["invoice_date"] >= tx["mid_date"]].groupby("customer_id")["order_val"].sum()
+
+    growth_df = pd.DataFrame({"customer_id": pre_summary["customer_id"]})
+    growth_df["early"] = growth_df["customer_id"].map(early_spend).fillna(0.0)
+    growth_df["late"] = growth_df["customer_id"].map(late_spend).fillna(0.0)
+    # Explicit spend growth formula: normalized relative growth between 2nd half and 1st half of pre-period
+    growth_df["spend_growth"] = (growth_df["late"] - growth_df["early"]) / (growth_df["late"] + growth_df["early"] + 10.0)
+    growth_df["growth_rank"] = growth_df["spend_growth"].rank(pct=True)
+    pre_summary["spend_growth"] = growth_df["spend_growth"].values
+
     if assignment_mode.lower() == "confounded":
         # Confounded assignment mode: treatment probability rises with customer's pre-period spend growth
-        tx = conn.execute(f"""
-            SELECT customer_id, invoice_date, SUM(line_total) as order_val
-            FROM fact_orders WHERE invoice_date < '{t0_str}'
-            GROUP BY customer_id, invoice_no, invoice_date
-        """).df()
-        tx["invoice_date"] = pd.to_datetime(tx["invoice_date"])
-        first_dates = tx.groupby("customer_id")["invoice_date"].min().reset_index().rename(columns={"invoice_date": "first_date"})
-        tx = tx.merge(first_dates, on="customer_id")
-        tx["mid_date"] = tx["first_date"] + (t0_date - tx["first_date"]) / 2.0
-        early_spend = tx[tx["invoice_date"] < tx["mid_date"]].groupby("customer_id")["order_val"].sum()
-        late_spend = tx[tx["invoice_date"] >= tx["mid_date"]].groupby("customer_id")["order_val"].sum()
-
-        growth_df = pd.DataFrame({"customer_id": pre_summary["customer_id"]})
-        growth_df["early"] = growth_df["customer_id"].map(early_spend).fillna(0.0)
-        growth_df["late"] = growth_df["customer_id"].map(late_spend).fillna(0.0)
-        # Explicit spend growth formula: normalized relative growth between 2nd half and 1st half of pre-period
-        growth_df["spend_growth"] = (growth_df["late"] - growth_df["early"]) / (growth_df["late"] + growth_df["early"] + 10.0)
-        growth_df["growth_rank"] = growth_df["spend_growth"].rank(pct=True)
-
         threshold = growth_df["growth_rank"].quantile(1.0 - treatment_share)
         treated_set = set(growth_df[growth_df["growth_rank"] >= threshold]["customer_id"])
-        pre_summary["spend_growth"] = growth_df["spend_growth"].values
     else:
         # Stratified random assignment of configured share within each pre-period spend quintile
         treated_set = set()

@@ -1,11 +1,16 @@
 metric,value,description
+code_version,79f4e2e35d5aff7c6f7670f188440565b43e4b08,Git commit SHA at execution time
+timestamp,2026-10-15T03:49:06.967248+00:00,UTC timestamp of benchmark execution
+source_script,scripts/run_confounded_benchmark.py,Source script that generated this benchmark
+panel_row_count,390939,Number of rows in the balanced customer-week panel
+assignment_mode,confounded,Treatment assignment mechanism
 pre_trend_wald_chi2,60.6339,Joint pre-period Wald parallel trends chi2 test statistic
 pre_trend_wald_df,9,Degrees of freedom for pre-period leads (-10 to -2)
-pre_trend_wald_p,1.011823e-09,P-value for joint pre-trend Wald test (rejects parallel trends)
+pre_trend_wald_p,1.011823e-09,P-value for joint pre-trend Wald test
 true_att,4.7670,Realized true ATT for weekly winsorized spend ($/cust/wk)
 twfe_estimate,14.0773,TWFE DiD ATT point estimate ($/cust/wk)
 twfe_se,1.9602,TWFE DiD cluster-robust standard error
-twfe_bias,9.3103,TWFE DiD bias (estimate - true_att)
+twfe_bias,9.3103,TWFE DiD bias (estimate - true_att) from confounded selection
 sc_estimate,50.6556,Synthetic Control ATT point estimate ($/cust/wk)
 sc_pre_rmspe,36.5875,Synthetic Control pre-treatment RMSPE ($)
 spend_growth_definition,(late_spend - early_spend) / (late_spend + early_spend + 10.0),Normalized formula for customer pre-period spend growth: (late - early) / (late + early + 10.0)

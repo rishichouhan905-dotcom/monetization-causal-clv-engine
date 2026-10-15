@@ -1,0 +1,19 @@
+metric,value,description
+code_version,79f4e2e35d5aff7c6f7670f188440565b43e4b08,Git commit SHA at execution time
+timestamp,2026-10-15T03:48:55.348676+00:00,UTC timestamp of benchmark execution
+source_script,scripts/run_confounded_benchmark.py,Source script that generated this benchmark
+panel_row_count,390939,Number of rows in the balanced customer-week panel
+assignment_mode,stratified_random,Treatment assignment mechanism
+pre_trend_wald_chi2,4.1326,Joint pre-period Wald parallel trends chi2 test statistic
+pre_trend_wald_df,9,Degrees of freedom for pre-period leads (-10 to -2)
+pre_trend_wald_p,9.024708e-01,P-value for joint pre-trend Wald test
+true_att,4.4831,Realized true ATT for weekly winsorized spend ($/cust/wk)
+twfe_estimate,5.5032,TWFE DiD ATT point estimate ($/cust/wk)
+twfe_se,1.7218,TWFE DiD cluster-robust standard error
+single_draw_error,1.0200,Single-draw estimation error (estimate - true_att) under random assignment
+sc_estimate,6.7308,Synthetic Control ATT point estimate ($/cust/wk)
+sc_pre_rmspe,5.2480,Synthetic Control pre-treatment RMSPE ($)
+spend_growth_definition,(late_spend - early_spend) / (late_spend + early_spend + 10.0),Normalized formula for customer pre-period spend growth: (late - early) / (late + early + 10.0)
+treated_mean_spend_growth,-0.5032,Mean pre-period spend growth for treated cohort
+control_mean_spend_growth,-0.5095,Mean pre-period spend growth for control cohort
+spend_growth_gap,0.0063,Pre-period spend growth gap (treated - control)

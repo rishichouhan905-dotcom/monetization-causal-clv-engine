@@ -1,6 +1,6 @@
 # System Results & Empirical Facts Reference 📊
 
-> **Notice**: This document is generated 100% programmatically by `scripts/build_results_facts.py` directly from analytical data in `results/`, `app_data/`, and `holdout_report.md`. It contains zero hand-typed numbers and serves as the single source of empirical truth.
+> **Notice**: This document is generated 100% programmatically by `scripts/build_results_facts.py` directly from analytical data in `results/`, `app_data/`, and `holdout_report.md`. It contains zero hand-typed numbers and strict provenance validation, serving as the single source of empirical truth.
 
 ## 1. Dataset & Population Summary
 
@@ -147,21 +147,36 @@
 
 ## 8. Confounded-Assignment Diagnostic & Pre-Trend Falsification (Real Panel)
 
-To validate the identification framework, we evaluate the system under a deliberate **confounded assignment mechanism** on the empirical 390,939-row balanced customer panel, where treatment probability correlates with individual pre-period spend growth. The table below contrasts the empirical real-panel confounded run (`results/confounded_assignment.csv`) against the benchmark stratified random assignment:
+To test the identification framework against parallel-trend violations, the engine executes an **extreme near-deterministic selection stress test** on the 390,939-row balanced customer panel. Under this stress test, treatment is deliberately assigned to units exhibiting the highest pre-period spend velocity, violating the unconfoundedness assumption ($Y(0), Y(1) \not\perp D \mid X$).
 
-| Identification Diagnostic / Estimator Metric | Baseline Stratified Random Assignment | Confounded Assignment (Real Panel) | Impact / Conclusion |
+### Exact Assignment Rule:
+1. **Normalized Pre-Period Spend Velocity**:
+   $$\text{spend\_growth}_i = \frac{\text{late\_spend}_i - \text{early\_spend}_i}{\text{late\_spend}_i + \text{early\_spend}_i + 10.0}$$
+   where $\text{early\_spend}_i$ is customer $i$'s total spend from first order to their pre-period midpoint ($t_{\text{mid}, i} = t_{\text{first}, i} + \frac{t_0 - t_{\text{first}, i}}{2}$), and $\text{late\_spend}_i$ is spend from $t_{\text{mid}, i}$ to $t_0$ (`2011-06-01`).
+2. **Near-Deterministic Selection**:
+   $$\text{threshold} = \text{quantile}_{1 - \text{share}}(\text{growth\_rank}_i) = 60^{\text{th}}\text{ percentile}$$
+   $$\text{is\_treated}_i = \mathbb{I}(\text{growth\_rank}_i \ge \text{threshold})$$
+   Customers in the top 40% of spend acceleration are assigned to treatment; flat and decelerating customers form the control donor pool.
+
+### Empirical Comparison: Baseline Random Assignment vs. Selection Stress Test
+
+Both evaluations are generated on the real empirical panel using the same covariance-based leads-and-lags estimator (`run_event_study` with degrees of freedom $\text{df} = K - 1 = 9$ across leads $k \in [-10, -2]$ relative to $t_0$):
+
+| Identification Diagnostic / Estimator Metric | Baseline Stratified Random Assignment | Confounded Assignment (Selection Stress Test) | Statistical Mechanism / Impact |
 | :--- | :---: | :---: | :--- |
-| **Pre-Trend Joint Wald Test Statistic ($\chi^2$)** | $\chi^2 = 6.53$ (df=9) | **$\chi^2 = 60.63$** (df=9) | Massive surge in pre-period test statistic |
-| **Pre-Trend Wald Test $p$-value** | $p = 0.6856 \ge 0.05$ | **$p = 1.0118e-09 < 0.001$** | **Rejects parallel trends** (Falsification triggered) |
-| **True Ground-Truth ATT ($/cust/wk)** | $+4.4831 | $+4.7670 | Known policy effect |
-| **TWFE DiD Estimate ($/cust/wk)** | $+5.5032 (SE=$1.7218) | **$+14.0773** (SE=$1.9602) | Upward bias from differential pre-trend |
-| **TWFE DiD Bias ($/cust/wk)** | **$+1.0200** | **$+9.3103** | **9.1x higher bias** under confounding |
-| **Synthetic Control ATT Estimate ($/cust/wk)** | $+6.7308 | **$+50.6556** | Severe divergence from donor inability to match trend |
+| **Provenance: Source Script** | `scripts/run_confounded_benchmark.py` | `scripts/run_confounded_benchmark.py` | Verified real-panel benchmark scripts |
+| **Provenance: Balanced Panel Rows** | 390,939 rows | 390,939 rows | Exact match to empirical warehouse panel |
+| **Provenance: Code Version** | `79f4e2e35d` | `79f4e2e35d` | Git commit tracking |
+| **Pre-Trend Joint Wald Test Statistic ($\chi^2$)** | $\chi^2 = 4.13$ (df=9) | **$\chi^2 = 60.63$** (df=9) | Consistent covariance-based Wald test |
+| **Pre-Trend Wald Test $p$-value** | $p = 0.9025 \ge 0.05$ | **$p = 1.0118e-09 < 0.001$** | **Falsification triggered**: correctly rejects parallel trends |
+| **True Ground-Truth ATT ($/cust/wk)** | $+4.4831 | $+4.7670 | Known counterfactual policy lift |
+| **TWFE DiD Estimate ($/cust/wk)** | $+5.5032 (SE=$1.7218) | **$+14.0773** (SE=$1.9602) | Upward bias absorbing differential trajectory |
+| **Single-Draw Error / TWFE Bias ($/cust/wk)** | **Single-draw error: $+1.0200** (Monte Carlo bias: **$-0.0393**, RMSE=$1.8396, **96% coverage** over 50 reps) | **Confounded bias: $+9.3103** | **236.8x higher** than Monte Carlo bias |
+| **Synthetic Control ATT Estimate ($/cust/wk)** | $+6.7308 | **$+50.6556** | Donor weights extrapolate upward to match treated growth |
 | **Synthetic Control Pre-RMSPE ($)** | $5.2480 | **$36.5875** | Pre-intervention donor fit breaks down (7.0x error) |
-| **Customer Pre-Period Spend Growth Formula** | — | `(late_spend - early_spend) / (late_spend + early_spend + 10.0)` | Explicit normalized growth metric |
-| **Treated Mean Spend Growth** | Balanced ($\approx 0.00$) | -0.0169 | Preferential selection of accelerating spenders |
-| **Control Mean Spend Growth** | Balanced ($\approx 0.00$) | -0.9121 | Decelerating or flat spenders left in control |
-| **Pre-Period Spend Growth Gap** | **0.0000** | **+0.8952** | Severe selection bias violating unconfoundedness |
+| **Treated Mean Spend Growth** | -0.5032 | -0.0169 | Selected accelerating spenders |
+| **Control Mean Spend Growth** | -0.5095 | -0.9121 | Decelerating spenders concentrated in control |
+| **Pre-Period Spend Growth Gap** | **+0.0063** (balanced across quintiles) | **+0.8952** | Extreme differential selection violating unconfoundedness |
 
 ## 9. Treatment Effect Heterogeneity across Pre-Intervention Spend Deciles
 

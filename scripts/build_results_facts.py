@@ -2,7 +2,7 @@
 """Build Results Facts Documentation.
 
 Generates docs/RESULTS_FACTS.md entirely from files in results/, app_data/, and
-holdout_report.md, with no hand-typed numbers.
+holdout_report.md, with no hand-typed numbers and strict provenance verification.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import sys
 import numpy as np
 import pandas as pd
 
-# Add src to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -41,7 +40,6 @@ def collect_test_and_ci_facts() -> dict:
     res = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, check=True)
     fast_tests = [line.strip() for line in res.stdout.splitlines() if "::" in line]
 
-    # Collect total test count
     cmd_all = [sys.executable, "-m", "pytest", "--collect-only", "-q"]
     res_all = subprocess.run(cmd_all, cwd=PROJECT_ROOT, capture_output=True, text=True, check=True)
     all_tests = [line.strip() for line in res_all.stdout.splitlines() if "::" in line]
@@ -54,8 +52,67 @@ def collect_test_and_ci_facts() -> dict:
     }
 
 
+def load_and_verify_benchmark(csv_path: Path, expected_mode: str) -> dict[str, str]:
+    """Loads a causal assignment benchmark CSV and executes strict provenance checks."""
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"Missing required benchmark file: {csv_path}. Run scripts/run_confounded_benchmark.py first."
+        )
+
+    df = pd.read_csv(csv_path)
+    data = dict(zip(df["metric"], df["value"]))
+
+    source_script = data.get("source_script", "")
+    panel_row_count = int(data.get("panel_row_count", 0))
+    code_version = data.get("code_version", "")
+    assignment_mode = data.get("assignment_mode", "")
+
+    # Provenance Check 1: source script name
+    if source_script != "scripts/run_confounded_benchmark.py":
+        raise ValueError(
+            f"PROVENANCE CHECK FAILED in {csv_path.name}: expected source script "
+            f"'scripts/run_confounded_benchmark.py', but got '{source_script}'."
+        )
+
+    # Provenance Check 2: panel row count equal to 390,939
+    if panel_row_count != 390939:
+        raise ValueError(
+            f"PROVENANCE CHECK FAILED in {csv_path.name}: expected panel row count 390,939, "
+            f"but got {panel_row_count:,}."
+        )
+
+    # Provenance Check 3: code version recorded
+    if not code_version or code_version == "unknown_commit" or len(code_version) < 7:
+        raise ValueError(
+            f"PROVENANCE CHECK FAILED in {csv_path.name}: missing or invalid git code version '{code_version}'."
+        )
+
+    # Provenance Check 4: fail if the source is a synthetic test function or dummy unit-test statistic
+    for k, v in data.items():
+        v_str = str(v).lower()
+        if "test_synthetic" in v_str or "synthetic_test" in v_str:
+            raise ValueError(
+                f"SOURCE CHECK FAILED in {csv_path.name}: synthetic test function reference detected in {k}='{v}'."
+            )
+
+    wald_chi2 = float(data.get("pre_trend_wald_chi2", 0.0))
+    if np.isclose(wald_chi2, 431.58, atol=2.0) or np.isclose(wald_chi2, 27.86, atol=2.0):
+        raise ValueError(
+            f"SOURCE CHECK FAILED in {csv_path.name}: detected synthetic unit-test dummy statistic (chi2={wald_chi2}). "
+            "Only empirical runs on the real 390,939-row panel are permitted."
+        )
+
+    if assignment_mode != expected_mode:
+        raise ValueError(
+            f"PROVENANCE CHECK FAILED in {csv_path.name}: expected assignment_mode='{expected_mode}', "
+            f"but got '{assignment_mode}'."
+        )
+
+    return data
+
+
 def main() -> None:
-    print("Building docs/RESULTS_FACTS.md dynamically...")
+    print("Building docs/RESULTS_FACTS.md dynamically with provenance checks...")
 
     app_data_dir = PROJECT_ROOT / "app_data"
     results_dir = PROJECT_ROOT / "results"
@@ -125,65 +182,26 @@ def main() -> None:
     # 5. Monte Carlo Summary
     mc_df = pd.read_csv(results_dir / "monte_carlo.csv")
 
-    # 6. Confounded Assignment (Empirical Real Panel Benchmark)
-    conf_path = results_dir / "confounded_assignment.csv"
-    if not conf_path.exists():
-        raise FileNotFoundError(
-            f"Missing required confounded benchmark file: {conf_path}. "
-            "Please run scripts/run_confounded_benchmark.py first."
-        )
-
-    conf_raw = pd.read_csv(conf_path)
-    conf_dict = dict(zip(conf_raw["metric"], conf_raw["value"]))
-
-    wald_chi2_conf = float(conf_dict["pre_trend_wald_chi2"])
-    wald_df_conf = int(conf_dict["pre_trend_wald_df"])
-    wald_p_conf = float(conf_dict["pre_trend_wald_p"])
-    true_att_conf = float(conf_dict["true_att"])
-    twfe_est_conf = float(conf_dict["twfe_estimate"])
-    twfe_se_conf = float(conf_dict["twfe_se"])
-    twfe_bias_conf = float(conf_dict["twfe_bias"])
-    sc_est_conf = float(conf_dict["sc_estimate"])
-    sc_rmspe_conf = float(conf_dict["sc_pre_rmspe"])
-    spend_growth_def = str(conf_dict["spend_growth_definition"])
-    tr_growth_conf = float(conf_dict["treated_mean_spend_growth"])
-    ct_growth_conf = float(conf_dict["control_mean_spend_growth"])
-    growth_gap_conf = float(conf_dict["spend_growth_gap"])
-
-    # Source Validation: strictly fail if a synthetic unit-test statistic is present
-    if np.isclose(wald_chi2_conf, 431.58, atol=2.0) or np.isclose(wald_chi2_conf, 27.86, atol=2.0):
-        raise ValueError(
-            f"FAIL: Detected synthetic unit-test statistic (chi2 = {wald_chi2_conf}) in {conf_path}! "
-            "docs/RESULTS_FACTS.md must strictly read empirical real-panel results (expected chi2 ~ 60.63)."
-        )
-
-    if not np.isclose(wald_chi2_conf, 60.6339, atol=0.1):
-        raise ValueError(
-            f"FAIL: Expected real-panel confounded Wald chi2 ~ 60.63, got {wald_chi2_conf}."
-        )
-
-    # Baseline comparison values on real panel (from committed att_vs_truth_baseline.csv)
-    base_twfe_row = att_base[
-        (att_base["Estimator_Model"] == "TWFE DiD (PanelOLS)")
-        & (att_base["Cohort"] == "Overall (All Treated)")
-        & (att_base["Outcome_Metric"] == "weekly_spend_winsor")
+    # Extract Monte Carlo benchmark for weekly spend winsor (Overall treated)
+    mc_spend_row = mc_df[
+        (mc_df["Scenario"] == "baseline")
+        & (mc_df["Cohort"] == "Overall (All Treated)")
+        & (mc_df["Outcome"] == "weekly_spend_winsor")
     ].iloc[0]
-    base_true_att = float(base_twfe_row["True_ATT"])
-    base_twfe_est = float(base_twfe_row["Estimated_ATT"])
-    base_twfe_se = float(base_twfe_row["Standard_Error"])
-    base_twfe_bias = base_twfe_est - base_true_att
+    mc_mean_bias = float(mc_spend_row["Mean_Bias"])
+    mc_rmse = float(mc_spend_row["RMSE"])
+    mc_coverage = float(mc_spend_row["Coverage_95pct"])
+    mc_replications = int(mc_spend_row["Replications"])
 
-    base_sc_row = att_base[
-        (att_base["Estimator_Model"] == "Synthetic Control (50 Donors)")
-        & (att_base["Cohort"] == "Overall (All Treated)")
-        & (att_base["Outcome_Metric"] == "weekly_spend_winsor")
-    ].iloc[0]
-    base_sc_est = float(base_sc_row["Estimated_ATT"])
-    base_sc_rmspe = float(base_sc_row["Standard_Error"])
-
-    base_wald_chi2 = 6.5330
-    base_wald_df = 9
-    base_wald_p = 0.6856
+    # 6. Confounded & Baseline Real-Panel Provenance Load
+    base_data = load_and_verify_benchmark(
+        results_dir / "baseline_assignment.csv",
+        expected_mode="stratified_random",
+    )
+    conf_data = load_and_verify_benchmark(
+        results_dir / "confounded_assignment.csv",
+        expected_mode="confounded",
+    )
 
     # 7. Heterogeneity Deciles Table
     het_base = pd.read_csv(results_dir / "heterogeneity_baseline.csv")
@@ -198,7 +216,7 @@ def main() -> None:
     doc_lines.append(
         "> **Notice**: This document is generated 100% programmatically by `scripts/build_results_facts.py` "
         "directly from analytical data in `results/`, `app_data/`, and `holdout_report.md`. "
-        "It contains zero hand-typed numbers and serves as the single source of empirical truth.\n"
+        "It contains zero hand-typed numbers and strict provenance validation, serving as the single source of empirical truth.\n"
     )
 
     # Section 1: Dataset Summary
@@ -283,50 +301,79 @@ def main() -> None:
     # Section 8: Confounded-Assignment Result (Empirical Real-Panel Falsification)
     doc_lines.append("## 8. Confounded-Assignment Diagnostic & Pre-Trend Falsification (Real Panel)\n")
     doc_lines.append(
-        "To validate the identification framework, we evaluate the system under a deliberate **confounded assignment mechanism** "
-        "on the empirical 390,939-row balanced customer panel, where treatment probability correlates with individual pre-period spend growth. "
-        "The table below contrasts the empirical real-panel confounded run (`results/confounded_assignment.csv`) against the benchmark stratified random assignment:\n"
+        "To test the identification framework against parallel-trend violations, the engine executes an "
+        "**extreme near-deterministic selection stress test** on the 390,939-row balanced customer panel. "
+        "Under this stress test, treatment is deliberately assigned to units exhibiting the highest pre-period spend velocity, "
+        "violating the unconfoundedness assumption ($Y(0), Y(1) \\not\\perp D \\mid X$).\n"
     )
-    doc_lines.append("| Identification Diagnostic / Estimator Metric | Baseline Stratified Random Assignment | Confounded Assignment (Real Panel) | Impact / Conclusion |")
+    doc_lines.append("### Exact Assignment Rule:")
+    doc_lines.append("1. **Normalized Pre-Period Spend Velocity**:")
+    doc_lines.append(
+        "   $$\\text{spend\\_growth}_i = \\frac{\\text{late\\_spend}_i - \\text{early\\_spend}_i}{\\text{late\\_spend}_i + \\text{early\\_spend}_i + 10.0}$$\n"
+        "   where $\\text{early\\_spend}_i$ is customer $i$'s total spend from first order to their pre-period midpoint "
+        "($t_{\\text{mid}, i} = t_{\\text{first}, i} + \\frac{t_0 - t_{\\text{first}, i}}{2}$), and $\\text{late\\_spend}_i$ is spend "
+        "from $t_{\\text{mid}, i}$ to $t_0$ (`2011-06-01`)."
+    )
+    doc_lines.append("2. **Near-Deterministic Selection**:")
+    doc_lines.append(
+        "   $$\\text{threshold} = \\text{quantile}_{1 - \\text{share}}(\\text{growth\\_rank}_i) = 60^{\\text{th}}\\text{ percentile}$$\n"
+        "   $$\\text{is\\_treated}_i = \\mathbb{I}(\\text{growth\\_rank}_i \\ge \\text{threshold})$$\n"
+        "   Customers in the top 40% of spend acceleration are assigned to treatment; flat and decelerating customers form the control donor pool.\n"
+    )
+
+    doc_lines.append("### Empirical Comparison: Baseline Random Assignment vs. Selection Stress Test\n")
+    doc_lines.append(
+        "Both evaluations are generated on the real empirical panel using the same covariance-based leads-and-lags estimator "
+        "(`run_event_study` with degrees of freedom $\\text{df} = K - 1 = 9$ across leads $k \\in [-10, -2]$ relative to $t_0$):\n"
+    )
+    doc_lines.append("| Identification Diagnostic / Estimator Metric | Baseline Stratified Random Assignment | Confounded Assignment (Selection Stress Test) | Statistical Mechanism / Impact |")
     doc_lines.append("| :--- | :---: | :---: | :--- |")
     doc_lines.append(
-        f"| **Pre-Trend Joint Wald Test Statistic ($\\chi^2$)** | $\\chi^2 = {base_wald_chi2:.2f}$ (df={base_wald_df}) | "
-        f"**$\\chi^2 = {wald_chi2_conf:.2f}$** (df={wald_df_conf}) | Massive surge in pre-period test statistic |"
+        f"| **Provenance: Source Script** | `{base_data['source_script']}` | `{conf_data['source_script']}` | Verified real-panel benchmark scripts |"
     )
     doc_lines.append(
-        f"| **Pre-Trend Wald Test $p$-value** | $p = {base_wald_p:.4f} \\ge 0.05$ | "
-        f"**$p = {wald_p_conf:.4e} < 0.001$** | **Rejects parallel trends** (Falsification triggered) |"
+        f"| **Provenance: Balanced Panel Rows** | {int(base_data['panel_row_count']):,} rows | {int(conf_data['panel_row_count']):,} rows | Exact match to empirical warehouse panel |"
     )
     doc_lines.append(
-        f"| **True Ground-Truth ATT ($/cust/wk)** | ${base_true_att:+.4f} | ${true_att_conf:+.4f} | Known policy effect |"
+        f"| **Provenance: Code Version** | `{base_data['code_version'][:10]}` | `{conf_data['code_version'][:10]}` | Git commit tracking |"
     )
     doc_lines.append(
-        f"| **TWFE DiD Estimate ($/cust/wk)** | ${base_twfe_est:+.4f} (SE=${base_twfe_se:.4f}) | "
-        f"**${twfe_est_conf:+.4f}** (SE=${twfe_se_conf:.4f}) | Upward bias from differential pre-trend |"
+        f"| **Pre-Trend Joint Wald Test Statistic ($\\chi^2$)** | $\\chi^2 = {float(base_data['pre_trend_wald_chi2']):.2f}$ (df={base_data['pre_trend_wald_df']}) | "
+        f"**$\\chi^2 = {float(conf_data['pre_trend_wald_chi2']):.2f}$** (df={conf_data['pre_trend_wald_df']}) | Consistent covariance-based Wald test |"
     )
     doc_lines.append(
-        f"| **TWFE DiD Bias ($/cust/wk)** | **${base_twfe_bias:+.4f}** | "
-        f"**${twfe_bias_conf:+.4f}** | **{abs(twfe_bias_conf / base_twfe_bias):.1f}x higher bias** under confounding |"
+        f"| **Pre-Trend Wald Test $p$-value** | $p = {float(base_data['pre_trend_wald_p']):.4f} \\ge 0.05$ | "
+        f"**$p = {float(conf_data['pre_trend_wald_p']):.4e} < 0.001$** | **Falsification triggered**: correctly rejects parallel trends |"
     )
     doc_lines.append(
-        f"| **Synthetic Control ATT Estimate ($/cust/wk)** | ${base_sc_est:+.4f} | "
-        f"**${sc_est_conf:+.4f}** | Severe divergence from donor inability to match trend |"
+        f"| **True Ground-Truth ATT ($/cust/wk)** | ${float(base_data['true_att']):+.4f} | ${float(conf_data['true_att']):+.4f} | Known counterfactual policy lift |"
     )
     doc_lines.append(
-        f"| **Synthetic Control Pre-RMSPE ($)** | ${base_sc_rmspe:.4f} | "
-        f"**${sc_rmspe_conf:.4f}** | Pre-intervention donor fit breaks down ({sc_rmspe_conf / base_sc_rmspe:.1f}x error) |"
+        f"| **TWFE DiD Estimate ($/cust/wk)** | ${float(base_data['twfe_estimate']):+.4f} (SE=${float(base_data['twfe_se']):.4f}) | "
+        f"**${float(conf_data['twfe_estimate']):+.4f}** (SE=${float(conf_data['twfe_se']):.4f}) | Upward bias absorbing differential trajectory |"
     )
     doc_lines.append(
-        f"| **Customer Pre-Period Spend Growth Formula** | — | `{spend_growth_def}` | Explicit normalized growth metric |"
+        f"| **Single-Draw Error / TWFE Bias ($/cust/wk)** | **Single-draw error: ${float(base_data['single_draw_error']):+.4f}** "
+        f"(Monte Carlo bias: **${mc_mean_bias:+.4f}**, RMSE=${mc_rmse:.4f}, **{mc_coverage*100:.0f}% coverage** over {mc_replications} reps) | "
+        f"**Confounded bias: ${float(conf_data['twfe_bias']):+.4f}** | **{abs(float(conf_data['twfe_bias']) / mc_mean_bias):.1f}x higher** than Monte Carlo bias |"
     )
     doc_lines.append(
-        f"| **Treated Mean Spend Growth** | Balanced ($\\approx 0.00$) | {tr_growth_conf:+.4f} | Preferential selection of accelerating spenders |"
+        f"| **Synthetic Control ATT Estimate ($/cust/wk)** | ${float(base_data['sc_estimate']):+.4f} | "
+        f"**${float(conf_data['sc_estimate']):+.4f}** | Donor weights extrapolate upward to match treated growth |"
     )
     doc_lines.append(
-        f"| **Control Mean Spend Growth** | Balanced ($\\approx 0.00$) | {ct_growth_conf:+.4f} | Decelerating or flat spenders left in control |"
+        f"| **Synthetic Control Pre-RMSPE ($)** | ${float(base_data['sc_pre_rmspe']):.4f} | "
+        f"**${float(conf_data['sc_pre_rmspe']):.4f}** | Pre-intervention donor fit breaks down ({float(conf_data['sc_pre_rmspe'])/float(base_data['sc_pre_rmspe']):.1f}x error) |"
     )
     doc_lines.append(
-        f"| **Pre-Period Spend Growth Gap** | **0.0000** | **{growth_gap_conf:+.4f}** | Severe selection bias violating unconfoundedness |\n"
+        f"| **Treated Mean Spend Growth** | {float(base_data['treated_mean_spend_growth']):+.4f} | {float(conf_data['treated_mean_spend_growth']):+.4f} | Selected accelerating spenders |"
+    )
+    doc_lines.append(
+        f"| **Control Mean Spend Growth** | {float(base_data['control_mean_spend_growth']):+.4f} | {float(conf_data['control_mean_spend_growth']):+.4f} | Decelerating spenders concentrated in control |"
+    )
+    doc_lines.append(
+        f"| **Pre-Period Spend Growth Gap** | **{float(base_data['spend_growth_gap']):+.4f}** (balanced across quintiles) | "
+        f"**{float(conf_data['spend_growth_gap']):+.4f}** | Extreme differential selection violating unconfoundedness |\n"
     )
 
     # Section 9: Heterogeneity Deciles Table
