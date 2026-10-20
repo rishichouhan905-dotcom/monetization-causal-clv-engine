@@ -81,3 +81,75 @@ def test_demo_mode_all_pages_and_tabs_render_without_exception(capsys) -> None:
         assert not at.exception, f"Policy Simulator exceptions: {[e.value for e in at.exception]}"
         assert len(at.slider) >= 1, "Expected policy waiver slider"
         print("  [PASS] Page: Policy Simulator | Controls & Guardrails (0 exceptions, {} metrics rendered)".format(len(at.metric)))
+
+
+def test_causal_impact_pre_trend_wald_matches_csv_and_scipy() -> None:
+    """Verifies that the pre-trend Wald statistic and p-value on Causal Impact match results/baseline_assignment.csv and scipy.stats.chi2.sf."""
+    import re
+    import pandas as pd
+    from scipy.stats import chi2
+    from streamlit.testing.v1 import AppTest
+
+    # 1. Read ground-truth benchmark from CSV
+    csv_path = PROJECT_ROOT / "results" / "baseline_assignment.csv"
+    assert csv_path.exists(), f"Missing required file: {csv_path}"
+
+    df_csv = pd.read_csv(csv_path)
+    csv_data = dict(zip(df_csv["metric"], df_csv["value"]))
+
+    assert "pre_trend_wald_chi2" in csv_data, "pre_trend_wald_chi2 missing from baseline_assignment.csv"
+    assert "pre_trend_wald_df" in csv_data, "pre_trend_wald_df missing from baseline_assignment.csv"
+    assert "pre_trend_wald_p" in csv_data, "pre_trend_wald_p missing from baseline_assignment.csv"
+
+    csv_chi2 = float(csv_data["pre_trend_wald_chi2"])
+    csv_df = int(float(csv_data["pre_trend_wald_df"]))
+    csv_p = float(csv_data["pre_trend_wald_p"])
+
+    # 2. Launch Streamlit headless app and navigate to Causal Impact
+    app_path = PROJECT_ROOT / "src" / "clv_causal" / "app" / "main.py"
+    at = AppTest.from_file(str(app_path), default_timeout=30)
+    at.run()
+
+    at.sidebar.radio[0].set_value("Causal Impact").run()
+    assert not at.exception, f"Exceptions on Causal Impact page: {[e.value for e in at.exception]}"
+
+    # 3. Test both scenarios: 'baseline' and 'hidden_degradation'
+    for scenario in ["baseline", "hidden_degradation"]:
+        at.selectbox[0].set_value(scenario).run()
+        assert not at.exception, f"Exceptions on scenario '{scenario}': {[e.value for e in at.exception]}"
+
+        # Find the callout containing the pre-trend Wald test
+        wald_boxes = [info.value for info in at.info if "Pre-Trend Wald Test" in info.value]
+        assert len(wald_boxes) >= 1, f"Pre-Trend Wald Test callout box missing for scenario '{scenario}'"
+        wald_text = wald_boxes[0]
+
+        # Extract Chi^2, df, and p from displayed callout text
+        m_chi2 = re.search(r"(?:Chi\^?2|chi2)\s*=\s*([0-9.]+)", wald_text, re.IGNORECASE)
+        m_df = re.search(r"df\s*=\s*([0-9]+)", wald_text)
+        m_p = re.search(r"p\s*=\s*([0-9.]+)", wald_text)
+
+        assert m_chi2, f"Could not parse Chi^2 statistic from: '{wald_text}'"
+        assert m_df, f"Could not parse df from: '{wald_text}'"
+        assert m_p, f"Could not parse p-value from: '{wald_text}'"
+
+        page_chi2 = float(m_chi2.group(1))
+        page_df = int(m_df.group(1))
+        page_p = float(m_p.group(1))
+
+        # Check 1: Fail if the page and the CSV differ
+        assert abs(page_chi2 - csv_chi2) < 1e-4, (
+            f"Scenario '{scenario}': Page chi2 ({page_chi2}) differs from CSV ({csv_chi2})"
+        )
+        assert page_df == csv_df, (
+            f"Scenario '{scenario}': Page df ({page_df}) differs from CSV ({csv_df})"
+        )
+        assert abs(page_p - csv_p) < 1e-3, (
+            f"Scenario '{scenario}': Page p-value ({page_p}) differs from CSV ({csv_p})"
+        )
+
+        # Check 2: Check scipy.stats.chi2.sf(chi2, df) equals displayed p within 1e-3
+        theoretical_p = float(chi2.sf(page_chi2, page_df))
+        assert abs(theoretical_p - page_p) < 1e-3, (
+            f"Scenario '{scenario}': scipy.stats.chi2.sf({page_chi2}, {page_df}) = {theoretical_p:.5f} "
+            f"does not match displayed p = {page_p:.5f} within 1e-3"
+        )

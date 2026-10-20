@@ -259,7 +259,7 @@ def render_overview_tab() -> None:
             f"with a 95% confidence interval spanning zero ({q5_act_ci_str}, p = {q5_active_p:.4f}). "
             f"Because the confidence band encompasses zero, there is statistical uncertainty in this draw: we cannot rule out a null impact, nor can we rule out "
             f"an active share loss of up to **{fmt_pp(abs(q5_active_ci_pp[0]))}** among your highest-value accounts. In stress conditions (*Hidden Degradation* scenario), "
-            f"Q5 active share drops by **−3.72 pp** (p = 0.0467)."
+            f"Q5 active share falls by **3.72 pp** (p = 0.0467)."
         )
     else:
         rec_paragraphs.append(

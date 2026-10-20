@@ -212,15 +212,16 @@ Both evaluations are generated on the real empirical panel using the same covari
 
 ## 10. Automated Test Suite & CI Execution Summary
 
-- **Fast CI Test Suite**: **12 passed tests** (unmarked, no warehouse required, executed in under 7 seconds).
+- **Fast CI Test Suite**: **13 passed tests** (unmarked, no warehouse required, executed in under 7 seconds).
 - **Warehouse & Full-Data Suite**: **27 tests** (marked `@pytest.mark.slow` or `@pytest.mark.fulldata`).
-- **Total Repository Tests**: **39 collected tests** across all units and integration suites.
+- **Total Repository Tests**: **40 collected tests** across all units and integration suites.
 
 ### Fast CI Tests Running in GitHub Actions Workflow:
 - `tests/test_causal_estimators.py::test_q5_policy_simulator_formula`
 - `tests/test_causal_estimators.py::test_policy_simulator_zero_delta_and_monotonicity`
 - `tests/test_decision.py::test_decision_framework`
 - `tests/test_demo_mode_headless.py::test_demo_mode_all_pages_and_tabs_render_without_exception`
+- `tests/test_demo_mode_headless.py::test_causal_impact_pre_trend_wald_matches_csv_and_scipy`
 - `tests/test_fast_synthetic_causal_and_clv.py::test_synthetic_simulator_panel_structure_and_realized_effects`
 - `tests/test_fast_synthetic_causal_and_clv.py::test_synthetic_twfe_solver_vs_panel_ols`
 - `tests/test_fast_synthetic_causal_and_clv.py::test_synthetic_wald_pre_trend_random_vs_confounded`
