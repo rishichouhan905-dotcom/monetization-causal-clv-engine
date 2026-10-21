@@ -1,150 +1,93 @@
-# Technical Methodology & Analytical Reference Manual 📐
+# Methodology
 
-This document details the mathematical, probabilistic, econometric, and computational methodology underlying the **Enterprise Probabilistic CLV & Causal Impact Decision Platform**. All empirical parameters, sample sizes, and benchmark results documented herein align strictly with [`docs/RESULTS_FACTS.md`](RESULTS_FACTS.md).
+This document explains what the project does, why each choice was made, which assumptions each result rests on, and where the evidence is weak. All numbers come from `docs/RESULTS_FACTS.md`, which is generated from files in `results/`, `app_data/` and `holdout_report.md`.
 
----
+## 1. Scope and the central caveat
 
-## 1. Data Engineering & Star Schema Architecture (dbt + DuckDB)
+The transactions are real. The pricing policy is **simulated**. The simulator changes outcomes after a policy date by known amounts, so the project can measure how well each method recovers a truth that is known. A real pricing change would not offer that check. Nothing here estimates the effect of a real policy.
 
-### 1.1 Empirical Dataset
-The foundational dataset is the **UCI Machine Learning Repository: Online Retail II** (Chen, 2019; DOI: `10.24432/C5CG6D`), comprising transaction logs from a UK-based registered non-store online retail merchant between **2009-12-01** and **2011-12-09**.
-- **Raw Transaction Rows**: 1,067,371 records.
-- **Valid Customer Invoices**: Filtered to non-null `Customer ID` integers across 41 countries.
-- **Settled Transaction Scope**: 824,293 records partitioned into:
-  - **Positive Orders (`fact_orders`)**: 805,549 lines with $Q > 0$, UnitPrice $> 0$.
-  - **Returns / Cancellations (`fact_returns`)**: 18,744 lines with $Q < 0$ or Invoice prefixed with `C`.
+## 2. Data and warehouse
 
-### 1.2 Explicit Cancellation & Financial Net Reconciliation
-Many e-commerce pipelines discard negative return lines or blindly aggregate them into gross totals, introducing systematic margin bias. Here, cancellations are explicitly preserved in staging (`stg_orders`) with `is_return` and `is_cancelled` flags. Downstream marts enforce a rigid accounting balance:
-$$\text{Net Revenue} = \text{Gross Revenue} - \text{Return Amount}$$
-$$\sum \text{dim\_customers.net\_spend} = \$16,648,292.37 \approx \sum (\text{fact\_orders} - \text{fact\_returns}) = \$16,648,292.39$$
-$$\Delta = \$0.0180 \quad (\text{rounding precision across 824,293 rows; exact } \$0.00 \text{ customer-level balance})$$
+**Source.** UCI Online Retail II: 1,067,371 raw rows from a UK-based online gift-ware retailer, 2009-12-01 to 2011-12-09, many wholesale customers. Both Excel sheets are loaded.
 
-24 automated dbt schema tests verify:
-- Primary key uniqueness on all dimension and fact tables (`dim_customers.customer_id`, `dim_products.stock_code`, `fact_orders.order_line_id`).
-- Referential integrity (`relationships` tests from fact foreign keys to dimension tables).
-- Singular SQL balance assertions (`assert_net_revenue_equals_gross_minus_returns.sql`).
+**Cleaning rules.**
+- Rows without a customer ID are excluded from customer-level analysis.
+- Returns (invoices starting with C, negative quantity) are kept in a separate table, `fact_returns`, instead of being dropped.
+- Zero-price lines are excluded from orders.
 
----
+**Result.** 805,549 positive order lines and 18,744 return lines, 5,939 customers (5,878 scored; 61 appear only in returns). Gross revenue $17,743,429.18, returns $1,095,136.79, net $16,648,292.39. The customer dimension agrees within two cents.
 
-## 2. Probabilistic Customer Lifetime Value (CLV) Engine
+**Warehouse.** dbt on DuckDB with staging, intermediate and mart layers (orders, returns, customers, products). Tests include unique and non-null keys, referential integrity and a revenue identity (gross minus returns equals net). A 5,000-row stratified sample lets CI run `dbt build` without the raw data.
 
-### 2.1 RFM Data Representation
-For each customer $i$ observed over historical time $[0, T_i]$, we compute:
-- **Frequency ($x_i$ or $F_i$)**: Number of repeat transaction dates ($x \ge 0$).
-- **Recency ($t_{x,i}$ or $T_{\text{recency},i}$)**: Time of the customer's last observed purchase date.
-- **Tenure ($T_i$)**: Total elapsed observation time from customer acquisition to the calibration cutoff.
-- **Monetary Value ($M_{\text{repeat},i}$)**: Average monetary value across repeat transactions ($x_i > 0$).
+## 3. CLV model
 
-### 2.2 BG/NBD Model Specification (Fader, Hardie, & Lee, 2005)
-The Beta-Geometric / Negative Binomial Distribution model characterizes transaction activity in continuous non-contractual settings under the following generative assumptions:
-1. **Purchase Process**: While active, customer $i$ makes transactions following a Poisson process with rate $\lambda_i$:
-   $$P(X(t) = x \mid \lambda_i) = \frac{(\lambda_i t)^x e^{-\lambda_i t}}{x!}$$
-2. **Heterogeneity in Transaction Rates**: Transaction rates across customers follow a Gamma distribution:
-   $$\lambda_i \sim \text{Gamma}(r, \alpha), \quad f(\lambda \mid r, \alpha) = \frac{\alpha^r \lambda^{r-1} e^{-\alpha \lambda}}{\Gamma(r)}$$
-3. **Dropout Opportunity**: Immediately after each transaction, an active customer has an unobserved probability $p_i$ of permanently dropping out (becoming inactive).
-4. **Heterogeneity in Dropout Probabilities**: Dropout probabilities across customers follow a Beta distribution:
-   $$p_i \sim \text{Beta}(a, b), \quad f(p \mid a, b) = \frac{p^{a-1} (1-p)^{b-1}}{B(a, b)}$$
-5. **Independence**: Transaction rate $\lambda_i$ and dropout probability $p_i$ are distributed independently across customers.
+**Models.** BG/NBD for purchase counts and dropout, Gamma-Gamma for average order value, both fit by maximum likelihood with `lifetimes` (penalizer 0). CLV is discounted gross revenue at 1% per month over 12 and 24 months. Gross margin is applied only in the policy simulator.
 
-### 2.3 Likelihood Function & Maximum Likelihood Estimation (MLE)
-The likelihood for an individual customer with history $(x, t_x, T)$ is given by:
-$$L(r, \alpha, a, b \mid x, t_x, T) = A_1 \cdot A_2 \cdot (A_3 + \mathbb{I}(x > 0) A_4)$$
-where parameters $(r, \alpha, a, b)$ are estimated via constrained Nelder-Mead optimization of the joint log-likelihood.
+**Why penalizer 0.** A positive penalizer pushed the fitted parameters to a+b below 1. In that region the closed-form expected-purchases formula for customers with no repeat orders returns NaN, and an earlier version silently converted that to zero. With penalizer 0, a+b is 5.71, 4.11 and 2.96 at the three cutoffs, so the standard formula is valid. A numerical integration fallback exists and raises an error instead of substituting values; it agrees with the closed form to about 1e-11 and with a large Monte Carlo simulation.
 
-### 2.4 Model Estimate of Active Probability: $P(\text{Alive})$
-The posterior probability that a customer with history $(x, t_x, T)$ is active at time $T$ is computed as:
-$$P(\text{Alive} \mid x, t_x, T, r, \alpha, a, b) = \left[ 1 + \frac{a}{b + x - 1} \left( \frac{\alpha + T}{\alpha + t_x} \right)^{r + x} \right]^{-1}$$
-- **Scored Population (Cutoff 2011-12-09)**: Across 5,878 scored customers, the mean model estimate is **88.43%**, reflecting the fitted dropout parameters ($a, b$).
-- **$F = 0$ Dynamics**: For single buyers ($x=0, t_x=0$), the customer has never had a repeat transaction opportunity to drop out, yielding $P(\text{Alive}) = 1.0$ identically across all single buyers.
+**Validation design.** Rolling origin: the model is fit on data up to a cutoff (2010-12-01, 2011-03-01, 2011-06-01) and judged on purchases and revenue until 2011-12-09. Results are reported for all customers and separately for one-time buyers (F = 0) and repeat buyers (F > 0). Customers are only scored if they appear in the calibration window.
 
-### 2.5 Gamma-Gamma Monetary Sub-Model (Fader & Hardie, 2013)
-To forecast customer spend, monetary value is modeled conditional on repeat transactions:
-- Individual transaction values $v_{i,j} \sim \text{Gamma}(p, \nu_i)$.
-- Latent customer spend scale $\nu_i \sim \text{Gamma}(q, \gamma)$.
-- Expected order spend for repeat buyers is derived via empirical Bayes shrinkage:
-  $$E[M \mid p, q, \gamma, F_i, M_{\text{repeat},i}] = \frac{(q - 1) \frac{\gamma}{p} + F_i M_{\text{repeat},i}}{q - 1 + F_i}$$
-- **Independence Validation**: Pearson correlation between frequency $F$ and repeat average spend $M_{\text{repeat}}$ is $r = 0.0605$ ($p = 1.27 \times 10^{-3}$), confirming the validity of independent transaction and monetary processes.
+**Baselines.** (a) Repeat purchases per day times holdout days; (b) carry-forward: last window's repeat count scaled to the holdout length; (c) tenure ranking for one-time buyers.
 
-### 2.6 Rolling-Origin Out-of-Sample Holdout Validation
-To evaluate model stability, rolling-origin evaluation is performed across three chronological cutoffs:
-1. **2010-12-01 (373-Day Holdout, $N=4,266$)**: Actual purchases 14,365 vs. Predicted 21,107 (+46.93% volume error; revenue error +40.57%). BG/NBD purchase MAE: 2.92 vs. Naive 1: 3.30 (+11.4% improvement).
-2. **2011-03-01 (283-Day Holdout, $N=4,537$)**: Actual purchases 11,787 vs. Predicted 12,722 (+7.93% volume error; revenue error +10.47%).
-3. **2011-06-01 (191-Day Holdout, $N=4,933$)**: Actual purchases 9,092 vs. Predicted 8,597 (-5.44% volume error; revenue error -5.65%). Holdout purchase MAE: 1.21; revenue MAE: $598.
+**Findings.**
+- Over-forecast shrinks as more history accumulates: +46.9% (first cutoff), +7.9%, -5.4% for purchases.
+- Carry-forward beats BG/NBD on purchases MAE at the first cutoff (2.27 vs 2.92).
+- For one-time buyers, BG/NBD ranking equals tenure ranking (Spearman 0.231 for both).
+- BG/NBD, MBG/NBD and Pareto/NBD produce nearly identical errors.
+- Mean P(alive) is 88.4%, concentrated near 1. The fitted dropout parameters are the reason; no other cause was tested.
 
----
+**Untested explanations.** Seasonality (the holiday peak falls inside the first holdout) and non-stationary customer behaviour are plausible causes of the early over-forecast. They were not tested and are labelled as hypotheses.
 
-## 3. Quasi-Experimental Causal Inference Pipeline
+## 4. Simulated policy
 
-### 3.1 Mechanism-Driven Policy Intervention Simulation
-At intervention threshold $t_0 = \text{2011-06-01}$, a targeted monetization policy is evaluated across a balanced **390,939-row customer-week panel** (4,933 customers $\times$ 79 calendar weeks, comprising 52 pre-period weeks and 27 post-period weeks).
-- **Targeting Mechanism**: Targeted fee waiver or free shipping threshold incentive applied to top-tier accounts.
-- **Ground Truth ATT**: Preserved at $+\$4.4820/\text{week}$ spend lift among treated customers.
-- **Dual Churn Scenarios**:
-  - **Baseline Scenario**: 20% cumulative churn among treated top-tier spenders.
-  - **Hidden Degradation Stress Scenario**: 40% cumulative churn concentrated among Quintile 5 VIP spenders, testing estimator robustness to asymmetric high-value attrition.
+| Setting | Value |
+|---|---|
+| Policy date t0 | 2011-06-01 (78 pre-weeks, 27 post-weeks) |
+| Eligible customers | first order before t0: 4,933 |
+| Treatment share | 40%, assigned at random within pre-period spend quintiles (seed 42) |
+| Treated customers | 1,973 |
+| Order-rate lift | +15% of each customer's pre-period weekly order rate (new orders appear in zero-purchase weeks) |
+| Basket-size lift | +10% on existing orders |
+| Top-quintile churn | cumulative probability over the 27 weeks: 20% (`baseline`), 40% (`hidden_degradation`), converted to a weekly hazard (about 0.82% and 1.87%) |
+| Panel | balanced customer-by-week, 390,939 rows, from each customer's first-order week |
 
-### 3.2 Two-Way Fixed Effects (TWFE) Difference-in-Differences
-The primary causal estimator solves the standard two-way fixed effects panel specification via `PanelOLS`:
-$$Y_{it} = \alpha_i + \lambda_t + \beta^{\text{TWFE}} D_{it} + \varepsilon_{it}$$
-where:
-- $\alpha_i$ is customer fixed effects (absorbing time-invariant unobserved customer heterogeneity).
-- $\lambda_t$ is week fixed effects (absorbing macroeconomic and seasonal retail shocks).
-- $D_{it} = \mathbb{I}(\text{Treated}_i = 1 \land t \ge t_0)$ is the post-treatment indicator.
-- Standard errors are clustered at the customer level ($i$), robust to arbitrary serial correlation within customer spending histories.
+Quintiles use observed pre-period spend, never model scores fitted on later data. The pre-period order rate excludes the first order and is shrunk toward the mean, because counting the first order biases the rate by tenure (84% of the lowest quintile are one-order buyers). The simulator stores the counterfactual outcome, the observed outcome and the true effect for every row, so true ATTs are exact.
 
-**Empirical Baseline Estimates**:
-- **Estimated ATT**: $+\$5.5020/\text{week}$ ($\text{SE} = \$1.7218$, $t = 3.1955$, $p = 0.0014$).
-- **95% Confidence Interval**: $[+\$2.1273, +\$8.8767]$ (successfully covering ground truth $+\$4.4820$).
-- **Single-Draw Realization Error**: $+\$1.0200/\text{week}$ (well within $1 \times \text{SE}$).
+Outcomes: weekly orders, weekly spend winsorized at the 99th percentile, and "active in the last 90 days" (any order in the last 13 weeks).
 
-### 3.3 Dynamic Event-Study Decomposition & Joint Wald Pre-Trend Test
-To test the core identifying assumption of parallel counterfactual trends, the panel is estimated with event-time leads and lags relative to omit week $k = -1$:
-$$Y_{it} = \alpha_i + \lambda_t + \sum_{k = -52, k \ne -1}^{26} \beta_k (D_i \times \mathbb{I}(t - t_0 = k)) + \varepsilon_{it}$$
-- **Pre-Intervention Leads**: Evaluated across $k \in [-10, -2]$ ($\text{df} = 9$).
-- **Joint Wald Test**:
-  $$W = \boldsymbol{\hat{\beta}}_{\text{pre}}^T \left[ \mathbf{V}_{\boldsymbol{\hat{\beta}}_{\text{pre}}} \right]^{-1} \boldsymbol{\hat{\beta}}_{\text{pre}} \sim \chi^2(\text{df}=9)$$
-- **Baseline Parallel Trends Result**: $\chi^2 = 4.1326$, $p = 0.9025$. With $p \gg 0.05$, there is zero evidence of differential pre-trends between treatment and control prior to $t_0$.
-- **Post-Intervention Cumulative Effect**: Linear combination variance $w^T \Sigma w$ confirms sustained positive post-period divergence.
+## 5. Estimators and checks
 
-### 3.4 Multi-Donor Synthetic Control
-To construct a nonparametric counterfactual, 50 donor cohorts are synthesized via constrained quadratic optimization:
-$$\min_{\mathbf{w}} \|\mathbf{Y}_{1,\text{pre}} - \mathbf{Y}_{0,\text{pre}} \mathbf{w}\|_2^2 \quad \text{s.t.} \quad \sum_{j=1}^J w_j = 1, \quad w_j \ge 0$$
-- **Baseline Pre-RMSPE**: $\$5.2480$ (demonstrating tight donor-pool tracking).
-- **Synthetic Control ATT**: $+\$5.1140/\text{week}$ (converging closely with TWFE).
-- **Sensitivity Refutation**: In-space placebo permutations and leave-one-donor-out sensitivity bounds confirm stability.
+**Two-way fixed effects DiD.** Customer and week fixed effects, standard errors clustered by customer. With one policy date and no staggered adoption, the usual TWFE weighting problems do not arise. The solver is cross-checked against `linearmodels.PanelOLS` (agreement to about 1e-14).
 
----
+**Event study.** Relative weeks from -10 to +26, normalised to the average of all pre-period weeks. The post-period mean (+$5.11, SE $1.89) is computed as a linear combination using the full covariance matrix.
 
-## 4. Monte Carlo Estimator Validation (50 Replications)
+**Pre-trend test.** Joint Wald test of the pre-period coefficients using the full covariance matrix. The baseline gives chi2 = 4.13 (df = 9, p = 0.90). Under random assignment parallel trends hold by construction, so passing is expected; it cannot prove the assumption holds.
 
-To confirm that the TWFE estimator is unbiased across random data realizations, a 50-run Monte Carlo simulation is executed across both experimental conditions (`results/monte_carlo.csv`):
-- **Replications ($M$)**: 50 full synthetic panel realizations per condition.
-- **Baseline Scenario Performance**:
-  - **Mean Bias**: $-\$0.0393/\text{week}$ (demonstrating asymptotic unbiasedness).
-  - **Empirical RMSE**: $\$1.8396/\text{week}$.
-  - **95% Confidence Interval Coverage**: **96.0%** (matching the nominal $95\%$ standard).
-  - **Statistical Rejection Rate ($\alpha = 0.05$)**: 86.0% statistical power.
-- **Hidden Degradation Scenario Performance**:
-  - **Mean Bias**: $-\$0.0768/\text{week}$.
-  - **Empirical RMSE**: $\$1.9168/\text{week}$.
-  - **95% Confidence Interval Coverage**: **94.0%**.
-  - **Statistical Rejection Rate**: 80.0%.
+**Synthetic control.** 50 donor cohorts made from random control customers, non-negative weights summing to one, placebo-in-space p-values. Its pre-period RMSPE is about $5.25 per customer-week, comparable to the effect, so it cannot detect effects this small.
 
----
+**Refutation and heterogeneity.** Placebo policy date, leave-one-donor-out, and effects by pre-period spend decile with Bonferroni-adjusted p-values (10 tests). In `baseline` no decile is significant after correction. In `hidden_degradation` one decile (D07) is; the top decile is not detected (true -$11.83, estimate -$10.54, SE $13.59).
 
-## 5. Selection Stress Testing & Falsification Mechanics
+**Monte Carlo.** 50 independent replications per scenario, redrawing assignment and outcomes. Reported per cohort and outcome: mean bias, RMSE, 95% interval coverage (92-100%), rejection rate at 5%. With 50 replications each coverage figure has about +/-3 points of simulation error.
 
-### 5.1 Confounded Assignment Rule
-To test the pipeline's falsification sensitivity, a near-deterministic selection stress test is run where treatment assignment is tied directly to pre-intervention spend velocity:
-$$\text{spend\_growth}_i = \frac{\text{late\_pre\_spend}_i - \text{early\_pre\_spend}_i}{\text{late\_pre\_spend}_i + \text{early\_pre\_spend}_i + 10.0}$$
-$$\text{growth\_rank}_i = \text{PercentileRank}(\text{spend\_growth}_i)$$
-$$\text{is\_treated}_i = \mathbb{I}(\text{growth\_rank}_i \ge \text{quantile}_{0.60}) = \mathbb{I}(\text{growth\_rank}_i \ge 60^{\text{th}}\text{ percentile})$$
-- **Selection Gradient**: Treated customers have an average growth index of $-0.0169$, whereas control customers have an average growth index of $-0.9121$ (growth gap $+0.8952$).
+**Confounded stress test.** Treatment probability rises with pre-period spend growth, defined as (late - early) / (late + early + 10) around each customer's pre-period midpoint. Treated customers average -0.017 growth against -0.912 for controls (gap 0.895), so assignment is close to deterministic. Result: pre-trend chi2 = 60.6 (p = 1.0e-9), TWFE +$14.08 against a true +$4.77 (bias +$9.31, +195%), synthetic control +$50.66 with RMSPE $36.59. This is an extreme scenario meant to show the diagnostics fire.
 
-### 5.2 Empirical Stress Test Results
-- **Pre-Trend Parallelism Joint Wald Test**: $\chi^2 = 60.6339$, $\text{df} = 9$, $p = 1.0118 \times 10^{-9}$. The pipeline decisively rejects parallel trends ($p < 0.001$).
-- **TWFE Estimator Bias**: Under confounded selection, TWFE severely over-attributes selection momentum to the policy, estimating $\hat{\beta} = +\$13.7923/\text{week}$ vs. ground truth $+\$4.4820$, producing an extreme bias of **$+\$9.3103/\text{week}$** ($236.8\times$ higher than Monte Carlo bias).
-- **Synthetic Control Fit Breakdown**: Donor tracking collapses; Pre-Period RMSPE increases by $7.0\times$ from $\$5.2480$ to **$\$36.5875$**.
+## 6. Policy simulator
 
-This dual benchmark demonstrates that the automated diagnostic framework reliably detects broken identifying assumptions before executive policy decisions are made.
+Net margin change = gross margin x waived share x top-quintile customers x weeks x (-ATT of top-quintile spend). Low, central and high values use the confidence limits of that ATT. The Q5 active-share effect scales with the unwaived share. No separate CLV term is added, because the estimated spend and retention responses already include lost customers; adding one would double count. At zero waiver the change is exactly zero (tested). Gross margin (40%) and the guardrail thresholds (-0.5 pp amber, -2.0 pp red) are configuration assumptions.
+
+## 7. Reproducibility
+
+- `make all` builds everything from the raw file in about 3.6 minutes (data 53 s, dbt 21 s, CLV 15 s, causal 59 s, report 3 s).
+- `make montecarlo` takes about 6 minutes.
+- `docs/RESULTS_FACTS.md` is generated by `scripts/build_results_facts.py` from saved files and checks the provenance of each source.
+- CI: ruff, 13 fast tests on synthetic data, and `dbt build` on the 5,000-row sample. A further 27 tests need the full data or run slowly (40 in total).
+
+## 8. Known limitations
+
+- Simulated policy; no real experiment, spillovers, price elasticity or competitor response.
+- One retailer and two years of data.
+- BG/NBD is no better than the carry-forward baseline on volume or overall ranking; its early over-forecast is not explained.
+- Heavy-tailed spend makes spend effects hard to detect; the top-quintile spend effect has about 14% power in `hidden_degradation`.
+- Random assignment guarantees parallel trends in the main design.
+- The 40% margin, discount rate, churn levels and guardrail thresholds are assumptions.
+- Extrapolating the effect beyond the observed 27 weeks assumes it persists.
