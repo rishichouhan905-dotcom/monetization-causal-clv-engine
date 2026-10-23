@@ -17,14 +17,10 @@ from clv_causal.config import PROJECT_ROOT
 
 def render_causal_tab() -> None:
     """Renders the Causal Impact page in Streamlit."""
-    st.markdown("## 🧪 Causal Impact & Quasi-Experimentation Studio")
+    st.markdown("## Causal Impact & Quasi-Experimentation Studio")
 
     # 1. Mandatory Causal Policy Banner
-    st.warning(
-        "**Real transactions (UCI Online Retail II) with a SIMULATED policy**\n\n"
-        "The evaluated policy is a pricing and bundling change that lifts engagement and purchase frequency for most customers "
-        "(Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5)."
-    )
+    st.info("Demo notice: transactions are real (UCI Online Retail II); the pricing policy and its effects are simulated.")
 
     # 2. Scenario Toggle
     col_scen, col_info = st.columns([2, 3])

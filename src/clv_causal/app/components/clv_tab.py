@@ -60,7 +60,7 @@ def _extract_markdown_tables_from_report(report_path: Path) -> List[pd.DataFrame
 
 def render_clv_tab() -> None:
     """Renders the Probabilistic Customer Lifetime Value (CLV) Explorer page in Streamlit."""
-    st.markdown("## 🔮 Probabilistic Customer Lifetime Value (CLV) Explorer")
+    st.markdown("## Probabilistic Customer Lifetime Value (CLV) Explorer")
     st.caption(
         f"Continuous BG/NBD repeat transaction Poisson process & Gamma-Gamma monetary distribution fitted via **{ESTIMATION_METHOD}**."
     )

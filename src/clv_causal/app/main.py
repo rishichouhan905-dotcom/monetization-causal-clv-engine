@@ -18,62 +18,58 @@ from clv_causal.app.components.clv_tab import render_clv_tab
 from clv_causal.app.components.causal_tab import render_causal_tab
 from clv_causal.app.components.scenario_tab import render_scenario_tab
 
-# Set wide layout and page metadata
-st.set_page_config(
-    page_title="Enterprise Probabilistic CLV & Causal Decision Platform",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Custom Styling with Responsive Metric Cards
-st.markdown(
-    """
-    <style>
-    /* Responsive Metric Card Styling to Prevent Truncation */
-    div[data-testid="stMetric"] {
-        background-color: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        padding: 12px 16px;
-        border-radius: 8px;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-        min-height: 105px;
-    }
-    div[data-testid="stMetric"]:hover {
-        border-color: #CBD5E1;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06);
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: #475569;
-        white-space: normal !important;
-        line-height: 1.25;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.35rem !important;
-        font-weight: 700;
-        color: #0F172A;
-        white-space: normal !important;
-        word-break: break-word !important;
-        line-height: 1.25;
-    }
-    div[data-testid="stMetricDelta"] {
-        font-size: 0.82rem;
-        white-space: normal !important;
-    }
-    /* Alert Box Styling */
-    .stAlert {
-        border-radius: 6px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
 def main() -> None:
     """Main application loop with sidebar navigation across the 4 platform pages."""
+    st.set_page_config(
+        page_title="Monetization Causal CLV Engine",
+        layout="wide",
+    )
+
+    # Custom Styling with Responsive Metric Cards
+    st.markdown(
+        """
+        <style>
+        /* Responsive Metric Card Styling to Prevent Truncation */
+        div[data-testid="stMetric"] {
+            background-color: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+            min-height: 105px;
+        }
+        div[data-testid="stMetric"]:hover {
+            border-color: #CBD5E1;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06);
+        }
+        div[data-testid="stMetricLabel"] {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #475569;
+            white-space: normal !important;
+            line-height: 1.25;
+        }
+        div[data-testid="stMetricValue"] {
+            font-size: 1.35rem !important;
+            font-weight: 700;
+            color: #0F172A;
+            white-space: normal !important;
+            word-break: break-word !important;
+            line-height: 1.25;
+        }
+        div[data-testid="stMetricDelta"] {
+            font-size: 0.82rem;
+            white-space: normal !important;
+        }
+        /* Alert Box Styling */
+        .stAlert {
+            border-radius: 6px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.sidebar.title("Enterprise Decision Engine")
     st.sidebar.caption("Probabilistic CLV & Quasi-Experimental Causal Platform")
 

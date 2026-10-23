@@ -49,7 +49,7 @@ def _load_data_quality_checks() -> Dict[str, Any]:
 
 def render_overview_tab() -> None:
     """Renders the Executive Overview page in Streamlit."""
-    st.markdown("## 📊 Executive Overview & Portfolio Health")
+    st.markdown("## Executive Overview & Portfolio Health")
 
     # 1. Mandatory Causal Simulation Banner on Overview with Scenario
     selected_scenario = st.sidebar.selectbox(
@@ -59,11 +59,7 @@ def render_overview_tab() -> None:
         help="Select the policy simulation scenario reflected in Overview causal metrics.",
     )
 
-    st.warning(
-        f"**Real transactions (UCI Online Retail II) with a SIMULATED policy** (Scenario: **{selected_scenario}**)\n\n"
-        "The evaluated policy is a simulated pricing and bundling change that lifts engagement and purchase frequency "
-        "for most customers (Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5)."
-    )
+    st.info("Demo notice: transactions are real (UCI Online Retail II); the pricing policy and its effects are simulated.")
 
     # 2. Read DuckDB Warehouse metrics (falls back to app_data Parquet if DB absent)
     conn = get_app_connection()
@@ -185,14 +181,17 @@ def render_overview_tab() -> None:
         "Overall ATT (Spend)",
         f"{fmt_usd(att_spend_val, plus_sign=True)} /wk",
         delta=f"{fmt_usd(att_spend_val, plus_sign=True)} /wk vs counterfactual",
+        delta_arrow="off",
+        delta_color="off",
         help=f"Quasi-experimental spend ATT under simulated policy. 95% CI: {fmt_ci(att_spend_ci[0], att_spend_ci[1], is_usd=True)}.",
     )
-    # Delta with real good/bad arrow for active share change
+    # Delta with neutral styling so negative values don't show up arrow
     kpi_col6.metric(
         "Q5 Active Share Change",
         fmt_pp(q5_active_pp, plus_sign=True),
         delta=f"{fmt_pp(q5_active_pp, plus_sign=True)} vs no policy",
-        delta_color="normal" if q5_active_pp >= 0 else "inverse",
+        delta_arrow="off",
+        delta_color="off",
         help=f"Change in 90-day active customer share for top spenders (Quintile 5). 95% CI: {fmt_ci(q5_active_ci_pp[0], q5_active_ci_pp[1], is_pp=True)}.",
     )
 
@@ -263,8 +262,8 @@ def render_overview_tab() -> None:
         )
     else:
         rec_paragraphs.append(
-            f"**Top-Quintile (Q5) Active Share Attrition**: Top-spend customers exhibit a statistically significant active share drop of "
-            f"**{fmt_pp(q5_active_pp, plus_sign=True)}** (95% CI: {q5_act_ci_str}, CI excludes zero), confirming customer alienation from the simulated fee structure."
+            f"**Top-Quintile (Q5) Active Share Attrition**: Top-spend customers exhibit a statistically significant active share loss where Q5 active share falls by "
+            f"**{abs(q5_active_pp):.2f} pp** (95% CI: {q5_act_ci_str}, CI excludes zero), confirming customer alienation from the simulated fee structure."
         )
 
     # Executive action text dependent on whether Q5 CI includes zero

@@ -23,14 +23,10 @@ from clv_causal.config import (
 
 def render_scenario_tab() -> None:
     """Renders the Policy Simulator page in Streamlit."""
-    st.markdown("## 🎛️ Policy Simulator: Q5 Fee Waiver & Margin Strategy")
+    st.markdown("## Policy Simulator: Q5 Fee Waiver & Margin Strategy")
 
     # 1. Mandatory Causal Policy Banner
-    st.warning(
-        "**Real transactions (UCI Online Retail II) with a SIMULATED policy**\n\n"
-        "The evaluated policy is a pricing and bundling change that lifts engagement and purchase frequency for most customers "
-        "(Quintiles 1–4) but alienates high-frequency top spenders (Quintile 5)."
-    )
+    st.info("Demo notice: transactions are real (UCI Online Retail II); the pricing policy and its effects are simulated.")
 
     st.caption(
         "Calibrate fee exemption waivers for Quintile 5 (top spenders) to mitigate spend compression and preserve active share."
@@ -120,11 +116,12 @@ def render_scenario_tab() -> None:
         st.markdown("### Simulated Policy Outcomes")
 
         m1, m2, m3 = st.columns(3)
-        # Central estimate with real good/bad delta arrow
         m1.metric(
             "Net Margin Change (Central)",
             fmt_usd(net_central, plus_sign=True),
             delta=f"{fmt_usd(net_central, plus_sign=True)} vs no waiver",
+            delta_arrow="off",
+            delta_color="off",
             help="Central estimate evaluated at -ATT_Q5_spend. Based on the estimated treatment effect.",
         )
         # 95% CI Uncertainty Band without decorative arrow to prevent truncation
@@ -138,6 +135,7 @@ def render_scenario_tab() -> None:
             "Q5 Active Share Effect",
             fmt_pp(active_with_waiver_pp),
             delta=active_share_delta_str,
+            delta_arrow="off",
             delta_color="off",  # Neutral colours as requested
             help="Change in 90-day active customer share with fee waiver vs without waiver.",
         )
@@ -223,6 +221,7 @@ def render_scenario_tab() -> None:
             "Point Estimate Status",
             status_pt_label,
             delta=f"{fmt_pp(point_act_pp)} ({status_pt_risk})",
+            delta_arrow="off",
             delta_color="off",
             help=f"Evaluated from point ATT: {fmt_pp(point_act_pp)}. Threshold from config.",
         )
@@ -232,6 +231,7 @@ def render_scenario_tab() -> None:
             "CI Worst-Case Status",
             status_w_label,
             delta=f"{fmt_pp(worst_act_pp)} ({status_w_risk})",
+            delta_arrow="off",
             delta_color="off",
             help=f"Evaluated from 95% CI lower bound: {fmt_pp(worst_act_pp)}. Threshold from config.",
         )

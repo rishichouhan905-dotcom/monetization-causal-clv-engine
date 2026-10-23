@@ -105,6 +105,9 @@ def test_causal_impact_pre_trend_wald_matches_csv_and_scipy() -> None:
     csv_df = int(float(csv_data["pre_trend_wald_df"]))
     csv_p = float(csv_data["pre_trend_wald_p"])
 
+    assert abs(csv_chi2 - 4.1326) < 1e-3, f"Expected chi2 ~ 4.1326, got {csv_chi2}"
+    assert abs(csv_p - 0.9025) < 1e-3, f"Expected p ~ 0.9025, got {csv_p}"
+
     # 2. Launch Streamlit headless app and navigate to Causal Impact
     app_path = PROJECT_ROOT / "src" / "clv_causal" / "app" / "main.py"
     at = AppTest.from_file(str(app_path), default_timeout=30)
@@ -153,3 +156,63 @@ def test_causal_impact_pre_trend_wald_matches_csv_and_scipy() -> None:
             f"Scenario '{scenario}': scipy.stats.chi2.sf({page_chi2}, {page_df}) = {theoretical_p:.5f} "
             f"does not match displayed p = {page_p:.5f} within 1e-3"
         )
+
+
+def test_app_runs_twice_in_a_row_layout_stays_wide(monkeypatch) -> None:
+    """Verifies that running the app twice in a row keeps the layout wide and page title correct."""
+    from streamlit.proto.PageConfig_pb2 import PageConfig as PageConfigProto
+    from streamlit.testing.v1.local_script_runner import LocalScriptRunner
+
+    captured_configs = []
+    orig_run = LocalScriptRunner.run
+
+    def hooked_run(self, *args, **kwargs):
+        res = orig_run(self, *args, **kwargs)
+        for m in self.forward_msgs():
+            if m.HasField("page_config_changed"):
+                captured_configs.append(m.page_config_changed)
+        return res
+
+    monkeypatch.setattr(LocalScriptRunner, "run", hooked_run)
+
+    # Test the server entry point (app/main.py)
+    app_path = PROJECT_ROOT / "app" / "main.py"
+    at = AppTest.from_file(str(app_path), default_timeout=30)
+
+    # Run 1
+    at.run()
+    assert not at.exception, f"Run 1 exceptions: {[e.value for e in at.exception]}"
+    assert len(captured_configs) >= 1, "Page config was not emitted on run 1"
+    assert captured_configs[0].layout == PageConfigProto.WIDE, (
+        f"Run 1 layout is not WIDE: {captured_configs[0].layout}"
+    )
+    assert captured_configs[0].title == "Monetization Causal CLV Engine"
+    assert not captured_configs[0].favicon, "Page icon should have no emoji"
+
+    # Run 2
+    at.run()
+    assert not at.exception, f"Run 2 exceptions: {[e.value for e in at.exception]}"
+    assert len(captured_configs) >= 2, (
+        "Page config was not emitted on run 2 (wide layout lost on later runs)"
+    )
+    assert captured_configs[1].layout == PageConfigProto.WIDE, (
+        f"Run 2 layout is not WIDE: {captured_configs[1].layout}"
+    )
+    assert captured_configs[1].title == "Monetization Causal CLV Engine"
+    assert not captured_configs[1].favicon, "Page icon should have no emoji"
+
+
+def test_set_page_config_only_called_in_main() -> None:
+    """Verifies that st.set_page_config is called only once in the entire repository, inside main()."""
+    app_src = PROJECT_ROOT / "src" / "clv_causal" / "app"
+    matches = []
+    for py_file in app_src.rglob("*.py"):
+        content = py_file.read_text(encoding="utf-8")
+        for idx, line in enumerate(content.splitlines(), 1):
+            if "set_page_config" in line and not line.strip().startswith("#"):
+                matches.append((str(py_file.relative_to(PROJECT_ROOT)), idx, line.strip()))
+
+    assert len(matches) == 1, f"Expected exactly 1 call to set_page_config, found: {matches}"
+    file_rel, line_no, line_content = matches[0]
+    assert "main.py" in file_rel, f"set_page_config should be in main.py, found in {file_rel}"
+
